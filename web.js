@@ -19,6 +19,7 @@ export const SETTINGS = [
   { key: 'SEPARATE_TABLE_TALK' },
   { key: 'LOG_CHANNEL' },
   { key: 'RECAP_CHANNEL' },
+  { key: 'GM_ROLE' },
 ];
 
 function readEnvLines() {

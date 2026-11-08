@@ -92,6 +92,9 @@
   .tline.tt { color: var(--dim); }
   .tline.tt .who { font-weight: 500; }
   .tline.note { color: var(--accent2); }
+  .tline.gm .who { color: var(--accent); }
+  .tag.voice { background: #2a2110; color: #ffd48a; border: 1px solid #5c4413; margin: 0 6px 0 0; }
+  .tag.voice.narr { background: #10242a; color: #9be7ef; border-color: #1f4f5c; }
   .tag.tt { background: var(--panel2); color: var(--dim); border: 1px solid var(--line); margin: 0 6px 0 0; }
   .transcript.hide-tt .tline.tt { display: none; }
   .switch { display: flex; align-items: center; gap: 8px; font-weight: 400; margin: 0; cursor: pointer; }
@@ -142,6 +145,7 @@
       <ul class="steps">
         <li>Join a voice channel, then type <code>/session start title:Your title</code> in a text channel.</li>
         <li>Players: <code>/character name:RunnerName</code> once, so recaps use runner names.</li>
+        <li>GM: have the <b>Game Master</b> role in Discord, so narration and NPC voices are labeled.</li>
         <li><code>/note text:…</code> adds anything important said in text chat.</li>
         <li><code>/session stop</code> at the end. The recap posts in <b>#recaps</b> a minute or two later, the full transcript in <b>#logs</b>, and both show up here under Sessions.</li>
         <li><code>/ask question:…</code> in Discord, or use the Ask tab here.</li>
@@ -192,6 +196,9 @@
           <input type="text" id="LOG_CHANNEL" placeholder="logs"></div>
       </div>
       <div class="hint">After each session the recap goes to <b>#recaps</b> and the full transcript to <b>#logs</b> (or whatever you name them here). Create the channels in Discord. If one doesn't exist, the bot posts in the channel where you typed <code>/session stop</code>.</div>
+      <label for="GM_ROLE">Game master role</label>
+      <input type="text" id="GM_ROLE" placeholder="Game Master, GM, Storyteller, DM">
+      <div class="hint">Give your GM / storyteller one of these Discord roles. Their lines are marked in the transcript with who they're voicing: <b>Narrator</b>, an <b>NPC</b>, or themselves. Separate several names with commas.</div>
       <label for="CAMPAIGN_NAME">Campaign name</label>
       <input type="text" id="CAMPAIGN_NAME" placeholder="our Shadowrun campaign">
       <div class="hint">Used in recaps, e.g. "Seattle 2081".</div>
@@ -457,7 +464,7 @@ async function openSession(id, view = 'recap') {
   const dur = s.endedAt ? Math.round((new Date(s.endedAt) - new Date(s.startedAt)) / 60000) : null;
   $('#sessView').innerHTML = `
     <h1>${esc(s.title)}</h1>
-    <div class="hint">${esc(s.date)}${s.voiceChannel ? ` · ${esc(s.voiceChannel)}` : ''}${dur != null ? ` · ${Math.floor(dur / 60)}h ${dur % 60}m` : ''}${s.tableTalkLines ? ` · ${s.tableTalkLines} lines of table talk kept out of the recap` : ''}</div>
+    <div class="hint">${esc(s.date)}${s.voiceChannel ? ` · ${esc(s.voiceChannel)}` : ''}${dur != null ? ` · ${Math.floor(dur / 60)}h ${dur % 60}m` : ''}${s.tableTalkLines ? ` · ${s.tableTalkLines} line${s.tableTalkLines === 1 ? '' : 's'} of table talk kept out of the recap` : ''}</div>
     <div class="tabs2">
       <button class="btn ${view === 'recap' ? '' : 'ghost'}" data-v="recap">Recap</button>
       <button class="btn ${view === 'transcript' ? '' : 'ghost'}" data-v="transcript">Transcript</button>
@@ -487,14 +494,18 @@ async function openSession(id, view = 'recap') {
 }
 
 let showTableTalk = true;
+function voiceTag(e) {
+  if (!e.gm || !e.voice || e.voice === 'GM') return '';
+  return e.voice === 'Narrator' ? '<span class="tag voice narr">📖 Narrator</span>' : `<span class="tag voice">🎭 ${esc(e.voice)}</span>`;
+}
 function renderTranscript(s) {
   if (!s.entries || !s.entries.length) return '<div class="empty">No transcript.</div>';
   const clock = (t) => new Date(t).toTimeString().slice(0, 5);
   const rows = s.entries.map((e) => e.kind === 'note'
     ? `<div class="tline note"><span class="tm">${clock(e.t)}</span>📝 <span class="who">${esc(e.speaker)}</span>: ${esc(e.text)}</div>`
-    : `<div class="tline ${e.offTopic ? 'tt' : ''}"><span class="tm">${clock(e.t)}</span>${e.offTopic ? '<span class="tag tt">table talk</span>' : ''}<span class="who">${esc(e.speaker)}</span>: ${esc(e.text)}</div>`).join('');
+    : `<div class="tline ${e.offTopic ? 'tt' : ''} ${e.gm ? 'gm' : ''}"><span class="tm">${clock(e.t)}</span>${e.offTopic ? '<span class="tag tt">table talk</span>' : ''}${voiceTag(e)}<span class="who">${esc(e.gm ? e.speaker.replace(/\s*\(GM( as [^)]*)?\)$/, '') + ' (GM)' : e.speaker)}</span>: ${esc(e.text)}</div>`).join('');
   const toggle = s.tableTalkLines
-    ? `<label class="switch" style="margin-bottom:8px"><input type="checkbox" id="ttToggle" ${showTableTalk ? 'checked' : ''}> Show table talk (${s.tableTalkLines} lines, dimmed)</label>`
+    ? `<label class="switch" style="margin-bottom:8px"><input type="checkbox" id="ttToggle" ${showTableTalk ? 'checked' : ''}> Show table talk (${s.tableTalkLines} line${s.tableTalkLines === 1 ? '' : 's'}, dimmed)</label>`
     : '';
   return `${toggle}<div class="transcript ${showTableTalk ? '' : 'hide-tt'}" id="tbox" style="white-space:normal;background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:14px;max-height:60vh;overflow:auto;font-size:13px">${rows}</div>`;
 }
@@ -530,6 +541,7 @@ async function loadSettings() {
   for (const k of ['CAMPAIGN_NAME', 'CLAUDE_MODEL', 'OLLAMA_MODEL']) $('#' + k).value = s[k];
   $('#LOG_CHANNEL').value = s.LOG_CHANNEL || 'logs';
   $('#RECAP_CHANNEL').value = s.RECAP_CHANNEL || 'recaps';
+  $('#GM_ROLE').value = s.GM_ROLE || 'Game Master, GM, Storyteller, DM';
   $('#SEPARATE_TABLE_TALK').checked = s.SEPARATE_TABLE_TALK !== 'false';
   const w = $('#WHISPER_MODEL');
   if (s.WHISPER_MODEL && ![...w.options].some((o) => o.value === s.WHISPER_MODEL)) w.add(new Option(s.WHISPER_MODEL, s.WHISPER_MODEL));
@@ -549,6 +561,7 @@ $('#saveBtn').addEventListener('click', async () => {
     SEPARATE_TABLE_TALK: $('#SEPARATE_TABLE_TALK').checked ? 'true' : 'false',
     LOG_CHANNEL: $('#LOG_CHANNEL').value.replace(/^#/, '').trim() || 'logs',
     RECAP_CHANNEL: $('#RECAP_CHANNEL').value.replace(/^#/, '').trim() || 'recaps',
+    GM_ROLE: $('#GM_ROLE').value.trim() || 'Game Master, GM, Storyteller, DM',
     ANTHROPIC_API_KEY: ai === 'claude' ? $('#ANTHROPIC_API_KEY').value : '',
   };
   if (ai === 'local') body.clear_ANTHROPIC_API_KEY = true; // no key = local AI

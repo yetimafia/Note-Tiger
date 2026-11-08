@@ -49,24 +49,43 @@ export function sessionLines(dir) {
 
 export const lineKey = (l) => `${l.t}:${l.speaker}`;
 
-// Which lines the AI tagged as off-topic table talk (saved in labels.json).
-export function readTableTalk(dir) {
-  return new Set(readJSON(path.join(dir, 'labels.json'), {}).offTopic || []);
+// What the AI worked out after the session (saved in labels.json):
+// which lines were off-topic table talk, and who the GM was voicing on each GM line.
+export function readLabels(dir) {
+  const l = readJSON(path.join(dir, 'labels.json'), {});
+  return { offTopic: new Set(l.offTopic || []), voices: new Map(Object.entries(l.voices || {})) };
+}
+export const readTableTalk = (dir) => readLabels(dir).offTopic;
+export const readVoices = (dir) => readLabels(dir).voices;
+
+export function updateLabels(dir, changes) {
+  const file = path.join(dir, 'labels.json');
+  writeJSON(file, { ...readJSON(file, {}), ...changes });
+}
+
+// "Seth (GM)" + voice "Mr. Johnson" -> "Seth (GM as Mr. Johnson)"
+export function displaySpeaker(line, voices = new Map()) {
+  const voice = voices.get(lineKey(line));
+  if (!voice || voice === 'GM') return line.speaker;
+  return `${line.speaker.replace(/\s*\(GM\)$/, '')} (GM as ${voice})`;
 }
 
 const clock = (t) => new Date(t).toTimeString().slice(0, 5);
 
 // Spoken lines + /note entries, in time order, each marked if it's table talk.
-export function transcriptEntries(lines, notes = [], offTopic = new Set()) {
+export function transcriptEntries(lines, notes = [], offTopic = new Set(), voices = new Map()) {
   return [
-    ...lines.map((l) => ({ t: l.t, kind: 'say', speaker: l.speaker, text: l.text, offTopic: offTopic.has(lineKey(l)) })),
+    ...lines.map((l) => ({
+      t: l.t, kind: 'say', speaker: displaySpeaker(l, voices), text: l.text,
+      offTopic: offTopic.has(lineKey(l)), gm: Boolean(l.gm), voice: voices.get(lineKey(l)) || null,
+    })),
     ...notes.map((n) => ({ t: n.t, kind: 'note', speaker: n.speaker, text: n.text, offTopic: false })),
   ].sort((a, b) => a.t - b.t);
 }
 
 // mode: 'all' (table talk marked), 'game' (table talk left out), 'table' (only table talk)
-export function formatTranscript(lines, notes = [], offTopic = new Set(), mode = 'all') {
-  return transcriptEntries(lines, notes, offTopic)
+export function formatTranscript(lines, notes = [], offTopic = new Set(), mode = 'all', voices = new Map()) {
+  return transcriptEntries(lines, notes, offTopic, voices)
     .filter((e) => (mode === 'game' ? !e.offTopic : mode === 'table' ? e.offTopic : true))
     .map((e) => (e.kind === 'note'
       ? `[${clock(e.t)}] NOTE from ${e.speaker}: ${e.text}`
@@ -92,14 +111,14 @@ export function readSession(gid, id) {
   const recapFile = path.join(dir, 'recap.md');
   const lines = sessionLines(dir);
   const notes = readJSON(path.join(dir, 'notes.json'), []);
-  const offTopic = readTableTalk(dir);
+  const { offTopic, voices } = readLabels(dir);
   return {
     ...meta,
     id,
     dir,
     recap: fs.existsSync(recapFile) ? fs.readFileSync(recapFile, 'utf8') : null,
-    transcript: formatTranscript(lines, notes, offTopic),
-    entries: transcriptEntries(lines, notes, offTopic),
+    transcript: formatTranscript(lines, notes, offTopic, 'all', voices),
+    entries: transcriptEntries(lines, notes, offTopic, voices),
     tableTalkLines: offTopic.size,
   };
 }

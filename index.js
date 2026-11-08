@@ -21,10 +21,10 @@ import {
 } from '@discordjs/voice';
 import prism from 'prism-media';
 import { pipeline, env as hfEnv } from '@huggingface/transformers';
-import { DISCORD_TOKEN, WHISPER_MODEL, WHISPER_DTYPE, MODELS_DIR, LOG_CHANNEL, RECAP_CHANNEL } from './config.js';
+import { DISCORD_TOKEN, WHISPER_MODEL, WHISPER_DTYPE, MODELS_DIR, LOG_CHANNEL, RECAP_CHANNEL, GM_ROLES } from './config.js';
 import {
   readJSON, writeJSON, sessionsDir, getSettings, saveSettings, listSessions, readLines, saveGuildName,
-  sessionLines, readTableTalk, formatTranscript,
+  sessionLines, readTableTalk, readLabels, formatTranscript,
 } from './store.js';
 import { askAI, recapSession, buildArchive, ASK_SYSTEM, AI_LABEL } from './ai.js';
 
@@ -90,8 +90,14 @@ function transcribe(pcm16kMono) {
 // guildId -> { dir, meta, textChannel, lines: [], pending: Set<Promise>, active: Set<userId> }
 const live = new Map();
 
+// The game master / storyteller is whoever has one of the GM roles (Settings → Game master role).
+function isGM(member) {
+  return Boolean(member?.roles?.cache?.some((r) => GM_ROLES.includes(r.name.toLowerCase())));
+}
+
 function speakerLabel(gid, member) {
   const name = member?.displayName ?? 'Unknown';
+  if (isGM(member)) return `${name} (GM)`;
   const runner = getSettings(gid).characters[member?.id];
   return runner ? `${name} (${runner})` : name;
 }
@@ -121,11 +127,9 @@ function listenTo(guild, connection, userId) {
       try {
         const text = await transcribe(toMono16k(pcm));
         if (!text) return;
-        const line = {
-          t: startedAt,
-          speaker: speakerLabel(guild.id, member ?? (await guild.members.fetch(userId).catch(() => null))),
-          text,
-        };
+        const who = member ?? (await guild.members.fetch(userId).catch(() => null));
+        const line = { t: startedAt, speaker: speakerLabel(guild.id, who), text };
+        if (isGM(who)) line.gm = true;
         rec.lines.push(line);
         fs.appendFileSync(path.join(rec.dir, 'transcript.jsonl'), JSON.stringify(line) + '\n');
       } catch (err) {
@@ -213,8 +217,12 @@ async function startSession(interaction) {
     }
   });
 
+  const gms = voice.members.filter((m) => isGM(m)).map((m) => m.displayName);
+  const gmNote = gms.length
+    ? `🎲 Game master: **${gms.join(', ')}**. I'll note who they're voicing (narrator or NPC) in the transcript.\n`
+    : `🎲 No game master found. Give the GM a role called **${GM_ROLES[0].replace(/\b\w/g, (c) => c.toUpperCase())}** so I can tell narration and NPCs apart.\n`;
   await interaction.editReply(
-    `🔴 **Recording "${title}"** in **${voice.name}**.\n` +
+    `🔴 **Recording "${title}"** in **${voice.name}**.\n` + gmNote +
     'Everyone in the channel is being transcribed for the session recap. ' +
     'Don\'t want to be recorded? Use `/optout on`. Stop with `/session stop`.',
   );
@@ -316,7 +324,8 @@ function findChannel(guild, name) {
 function writeTranscriptFile(dir) {
   const file = path.join(dir, 'transcript.txt');
   if (!fs.existsSync(file)) {
-    fs.writeFileSync(file, formatTranscript(sessionLines(dir), readJSON(path.join(dir, 'notes.json'), []), readTableTalk(dir)));
+    const { offTopic, voices } = readLabels(dir);
+    fs.writeFileSync(file, formatTranscript(sessionLines(dir), readJSON(path.join(dir, 'notes.json'), []), offTopic, 'all', voices));
   }
   return file;
 }
