@@ -265,11 +265,9 @@ async function stopSession(guild, channel, reason) {
   const recapChannel = findChannel(guild, RECAP_CHANNEL);
   const logChannel = findChannel(guild, LOG_CHANNEL);
   const files = writeTranscriptFiles(rec.dir, guild.id);
-  // The .html file is the color-coded version (opens in a browser); the .txt previews in Discord.
-  const attachments = () => [
-    new AttachmentBuilder(files.html, { name: `transcript-${rec.meta.date}.html` }),
-    new AttachmentBuilder(files.txt, { name: `transcript-${rec.meta.date}.txt` }),
-  ];
+  // Discord shows .html files as code, so only the plain text goes to Discord; the color-coded page
+  // (transcript.html) is available from "Download transcript" in the Note Tiger window.
+  const attachments = () => [new AttachmentBuilder(files.txt, { name: `transcript-${rec.meta.date}.txt` })];
   const tips = [];
 
   let logPosted = null;
