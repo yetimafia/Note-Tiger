@@ -5,12 +5,13 @@
 package main
 
 import (
-	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
 	"syscall"
+	"time"
 	"unsafe"
 
 	webview2 "github.com/jchv/go-webview2"
@@ -49,7 +50,8 @@ func panelPort(base string) string {
 	return "3080"
 }
 
-// Shown while the manager starts up; switches to the panel as soon as it answers.
+// Shown while the manager starts up. The Go side checks when it's ready and then navigates
+// (a page loaded from a string isn't allowed to call localhost itself).
 const loadingPage = `<!DOCTYPE html><html><head><meta charset="utf-8"><style>
 body{margin:0;height:100vh;display:flex;align-items:center;justify-content:center;flex-direction:column;
 background:#0d0f14;color:#e6e8ee;font:15px system-ui,"Segoe UI",sans-serif}
@@ -57,19 +59,30 @@ background:#0d0f14;color:#e6e8ee;font:15px system-ui,"Segoe UI",sans-serif}
 .s{color:#9aa3b5}.spin{width:28px;height:28px;border:3px solid #2a3140;border-top-color:#f5a524;border-radius:50%;
 animation:r 1s linear infinite;margin:22px}@keyframes r{to{transform:rotate(360deg)}}
 .err{display:none;color:#ffb3bb;max-width:460px;text-align:center;line-height:1.5}
-</style></head><body><div class="t">🐯 Note <span>Tiger</span></div><div class="spin"></div>
+</style></head><body><div class="t">🐯 Note <span>Tiger</span></div><div class="spin" id="spin"></div>
 <div class="s" id="s">Starting up…</div><div class="err" id="e">Note Tiger isn't responding. Right-click the tiger icon by the clock
-and choose <b>Open log file</b> to see why, or quit and start Note Tiger again.</div>
-<script>
-const url = "%s";
-let tries = 0;
-async function check() {
-  try { await fetch(url + "/api/status", { mode: "no-cors", cache: "no-store" }); location.replace(url + "/"); }
-  catch { tries++; if (tries === 40) { document.getElementById("e").style.display = "block"; document.getElementById("s").style.display = "none"; }
-    setTimeout(check, 750); }
+and choose <b>Open log file</b> to see why, or choose <b>Restart Note Tiger</b>.</div>
+<script>window.ntShowError = () => { e.style.display = "block"; s.style.display = "none"; spin.style.display = "none"; };</script>
+</body></html>`
+
+// Wait until the manager answers, then show the panel. Keeps trying, so it recovers after restarts too.
+func waitForPanel(w webview2.WebView, url string) {
+	client := &http.Client{Timeout: 2 * time.Second}
+	start := time.Now()
+	shownError := false
+	for {
+		if resp, err := client.Get(url + "/api/status"); err == nil {
+			resp.Body.Close()
+			w.Dispatch(func() { w.Navigate(url + "/") })
+			return
+		}
+		if !shownError && time.Since(start) > 45*time.Second {
+			shownError = true
+			w.Dispatch(func() { w.Eval("window.ntShowError && window.ntShowError()") })
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
 }
-check();
-</script></body></html>`
 
 func main() {
 	exe, _ := os.Executable()
@@ -118,6 +131,7 @@ func main() {
   if (href.startsWith('http') && !href.startsWith(location.origin)) { e.preventDefault(); window.ntOpenExternal(href); }
 }, true);`)
 
-	w.SetHtml(fmt.Sprintf(loadingPage, url))
+	w.SetHtml(loadingPage)
+	go waitForPanel(w, url)
 	w.Run()
 }
