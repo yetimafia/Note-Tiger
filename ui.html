@@ -86,17 +86,16 @@
   .power .grow { flex: 1; min-width: 0; }
   button.btn.big { padding: 13px 26px; font-size: 16px; min-width: 150px; }
   button.btn.stop { background: var(--panel2); color: var(--text); border: 1px solid var(--line); }
-  .tline { padding: 3px 0 3px 10px; border-left: 3px solid transparent; margin: 1px 0; }
-  .tline .who { font-weight: 600; }
-  .tline .tm { color: var(--dim); margin-right: 6px; }
-  .tline.tt { color: var(--dim); }
-  .tline.tt .who { opacity: .6; }
-  .tline.tt .who { font-weight: 500; }
-  .tline.note { color: var(--accent2); }
-  .tag.voice { background: #2a2110; color: #ffd48a; border: 1px solid #5c4413; margin: 0 6px 0 0; }
-  .tag.voice.narr { background: #10242a; color: #9be7ef; border-color: #1f4f5c; }
-  .tag.tt { background: var(--panel2); color: var(--dim); border: 1px solid var(--line); margin: 0 6px 0 0; }
-  .transcript.hide-tt .tline.tt { display: none; }
+  .tview { max-height: 62vh; overflow: auto; padding-right: 4px; }
+  .tblock { background: var(--panel2); border-left: 4px solid; border-radius: 6px; padding: 8px 14px 10px 12px; margin: 5px 0; font-size: 14px; }
+  .tblock .tname { font-weight: 600; margin-bottom: 3px; }
+  .tblock .tl { padding: 1px 0; line-height: 1.45; }
+  .tblock .tm { font: 12px ui-monospace, Consolas, monospace; background: var(--bg); color: var(--dim); border-radius: 4px; padding: 1px 5px; margin-right: 8px; }
+  .tblock.tt { opacity: .6; }
+  .tblock.tt .tl { font-style: italic; }
+  .tblock.note { background: #1a1e27; }
+  .tag.tt { background: var(--bg); color: var(--dim); border: 1px solid var(--line); }
+  .tview.hide-tt .tblock.tt { display: none; }
   .switch { display: flex; align-items: center; gap: 8px; font-weight: 400; margin: 0; cursor: pointer; }
   @media (max-width: 800px) { .sessions { grid-template-columns: 1fr; } nav { margin-left: 0; } header { flex-wrap: wrap; } }
 </style>
@@ -469,7 +468,7 @@ async function openSession(id, view = 'recap') {
       <button class="btn ${view === 'recap' ? '' : 'ghost'}" data-v="recap">Recap</button>
       <button class="btn ${view === 'transcript' ? '' : 'ghost'}" data-v="transcript">Transcript</button>
       <span style="flex:1"></span>
-      <button class="btn ghost" id="dlBtn">Download transcript</button>
+      <button class="btn ghost" id="dlBtn" title="Color-coded page that opens in any browser">Download transcript</button>
       <button class="btn ghost" id="regenBtn" title="Re-checks table talk and writes the recap again">${s.recap ? 'Rewrite recap' : 'Write recap'}</button>
       <button class="btn danger" id="delBtn">Delete</button>
     </div>
@@ -501,13 +500,21 @@ function voiceTag(e) {
 function renderTranscript(s) {
   if (!s.entries || !s.entries.length) return '<div class="empty">No transcript.</div>';
   const clock = (t) => new Date(t).toTimeString().slice(0, 5);
-  const rows = s.entries.map((e) => e.kind === 'note'
-    ? `<div class="tline note"><span class="tm">${clock(e.t)}</span>📝 <span class="who">${esc(e.speaker)}</span>: ${esc(e.text)}</div>`
-    : `<div class="tline ${e.offTopic ? 'tt' : ''} ${e.gm ? 'gm' : ''}" style="${e.color ? `border-left:3px solid ${e.color}${e.offTopic ? '55' : ''}` : ''}"><span class="tm">${clock(e.t)}</span>${e.offTopic ? '<span class="tag tt">table talk</span>' : ''}${voiceTag(e)}<span class="who" style="${e.color ? `color:${e.color}` : ''}">${esc(e.gm ? e.speaker.replace(/\s*\(GM( as [^)]*)?\)$/, '') + ' (GM)' : e.speaker)}</span>: ${esc(e.text)}</div>`).join('');
+  // Consecutive lines from the same speaker become one block, like in Discord's #logs.
+  const groups = [];
+  for (const e of s.entries) {
+    const name = e.kind === 'note' ? `📝 Note from ${e.speaker}` : e.speaker;
+    const last = groups.at(-1);
+    if (last && last.name === name && last.offTopic === e.offTopic && last.kind === e.kind) last.lines.push(e);
+    else groups.push({ name, kind: e.kind, offTopic: e.offTopic, color: e.kind === 'note' ? '#C8CCD4' : (e.color || '#C8CCD4'), lines: [e] });
+  }
+  const blocks = groups.map((g) => `<div class="tblock ${g.offTopic ? 'tt' : ''} ${g.kind === 'note' ? 'note' : ''}" style="border-left-color:${g.color}">
+      <div class="tname" style="color:${g.color}">${esc(g.name)}${g.offTopic ? '<span class="tag tt" style="margin-left:8px">table talk</span>' : ''}</div>
+      ${g.lines.map((e) => `<div class="tl"><span class="tm">${clock(e.t)}</span>${esc(e.text)}</div>`).join('')}</div>`).join('');
   const toggle = s.tableTalkLines
-    ? `<label class="switch" style="margin-bottom:8px"><input type="checkbox" id="ttToggle" ${showTableTalk ? 'checked' : ''}> Show table talk (${s.tableTalkLines} line${s.tableTalkLines === 1 ? '' : 's'}, dimmed)</label>`
+    ? `<label class="switch" style="margin-bottom:10px"><input type="checkbox" id="ttToggle" ${showTableTalk ? 'checked' : ''}> Show table talk (${s.tableTalkLines} line${s.tableTalkLines === 1 ? '' : 's'}, dimmed)</label>`
     : '';
-  return `${toggle}<div class="transcript ${showTableTalk ? '' : 'hide-tt'}" id="tbox" style="white-space:normal;background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:14px;max-height:60vh;overflow:auto;font-size:13px">${rows}</div>`;
+  return `${toggle}<div class="tview ${showTableTalk ? '' : 'hide-tt'}" id="tbox">${blocks}</div>`;
 }
 
 // ---------- ask ----------

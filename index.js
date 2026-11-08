@@ -24,7 +24,7 @@ import { pipeline, env as hfEnv } from '@huggingface/transformers';
 import { DISCORD_TOKEN, WHISPER_MODEL, WHISPER_DTYPE, MODELS_DIR, LOG_CHANNEL, RECAP_CHANNEL, GM_ROLES } from './config.js';
 import {
   readJSON, writeJSON, sessionsDir, getSettings, saveSettings, listSessions, readLines, saveGuildName,
-  sessionLines, readTableTalk, readLabels, formatTranscript, transcriptEntries, speakerColors, baseName,
+  sessionLines, readTableTalk, readLabels, transcriptEntries, speakerColors, baseName, writeTranscriptFiles,
 } from './store.js';
 import { askAI, recapSession, buildArchive, ASK_SYSTEM, AI_LABEL } from './ai.js';
 
@@ -264,8 +264,12 @@ async function stopSession(guild, channel, reason) {
   // The recap goes to #recaps and the full transcript to #logs (falling back to this channel).
   const recapChannel = findChannel(guild, RECAP_CHANNEL);
   const logChannel = findChannel(guild, LOG_CHANNEL);
-  const transcriptFile = writeTranscriptFile(rec.dir);
-  const attachment = () => new AttachmentBuilder(transcriptFile, { name: `transcript-${rec.meta.date}.txt` });
+  const files = writeTranscriptFiles(rec.dir, guild.id);
+  // The .html file is the color-coded version (opens in a browser); the .txt previews in Discord.
+  const attachments = () => [
+    new AttachmentBuilder(files.html, { name: `transcript-${rec.meta.date}.html` }),
+    new AttachmentBuilder(files.txt, { name: `transcript-${rec.meta.date}.txt` }),
+  ];
   const tips = [];
 
   let logPosted = null;
@@ -275,7 +279,7 @@ async function stopSession(guild, channel, reason) {
       await logChannel.send({
         content: `📜 **Transcript: ${rec.meta.title}** (${rec.meta.date}) · ${lines.length} lines` +
           (tableTalk ? ` · ${tableTalk} marked as table talk` : ''),
-        files: [attachment()],
+        files: attachments(),
       });
       logPosted = logChannel;
       await postColorLog(logChannel, guild.id, rec.dir).catch((err) => console.error('[logs] color log:', err.message));
@@ -290,10 +294,10 @@ async function stopSession(guild, channel, reason) {
   let recapPosted = null;
   if (recap) {
     const pointer = logPosted ? `\n\n*Full transcript in <#${logPosted.id}>.*` : '';
-    const files = logPosted ? [] : [attachment()];
+    const recapFiles = logPosted ? [] : attachments();
     const text = `# ${rec.meta.title} — ${rec.meta.date}\n${recap}${pointer}`;
     if (recapChannel) {
-      try { await sendLong(recapChannel, text, files); recapPosted = recapChannel; }
+      try { await sendLong(recapChannel, text, recapFiles); recapPosted = recapChannel; }
       catch (err) {
         console.error(`[recaps] couldn't post in #${recapChannel.name}:`, err.message);
         tips.push(`I couldn't post in <#${recapChannel.id}>. Check that I can send messages and attach files there.`);
@@ -301,9 +305,9 @@ async function stopSession(guild, channel, reason) {
     } else if (RECAP_CHANNEL) {
       tips.push(`Create a text channel called **#${RECAP_CHANNEL}** and I'll post recaps there.`);
     }
-    if (!recapPosted) { await sendLong(channel, text, files); recapPosted = channel; }
+    if (!recapPosted) { await sendLong(channel, text, recapFiles); recapPosted = channel; }
   } else if (!logPosted) {
-    await channel.send({ files: [attachment()] });
+    await channel.send({ files: attachments() });
   }
 
   // Short note where the command was used, so people know where to look.
@@ -357,15 +361,6 @@ function findChannel(guild, name) {
     c.name.toLowerCase() === name && c.permissionsFor(guild.members.me)?.has('ViewChannel')) ?? null;
 }
 
-// transcript.txt is normally written during the recap; make sure it exists even if that failed.
-function writeTranscriptFile(dir) {
-  const file = path.join(dir, 'transcript.txt');
-  if (!fs.existsSync(file)) {
-    const { offTopic, voices } = readLabels(dir);
-    fs.writeFileSync(file, formatTranscript(sessionLines(dir), readJSON(path.join(dir, 'notes.json'), []), offTopic, 'all', voices));
-  }
-  return file;
-}
 
 // ---------- slash commands ----------
 const commands = [

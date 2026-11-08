@@ -151,11 +151,12 @@ export function startWeb(ctx, port) {
         if (action === 'recap' && req.method === 'POST') return send(res, 200, { recap: await ctx.regenerateRecap(guild, id) });
         if (action === 'transcript' && req.method === 'GET') {
           const s = ctx.readSession(guild, id);
+          const asText = url.searchParams.get('format') === 'txt';
           res.writeHead(200, {
-            'Content-Type': 'text/plain; charset=utf-8',
-            'Content-Disposition': `attachment; filename="transcript-${s.date || id}.txt"`,
+            'Content-Type': asText ? 'text/plain; charset=utf-8' : 'text/html; charset=utf-8',
+            'Content-Disposition': `attachment; filename="transcript-${s.date || id}.${asText ? 'txt' : 'html'}"`,
           });
-          return res.end(s.transcript);
+          return res.end(asText ? s.transcript : ctx.transcriptHtml(guild, id));
         }
       }
 

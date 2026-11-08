@@ -149,3 +149,69 @@ export function readSession(gid, id) {
     tableTalkLines: offTopic.size,
   };
 }
+
+// ---------- color-coded transcript page (transcript.html) ----------
+const escHtml = (t) => String(t ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+// Consecutive lines from the same speaker become one block.
+export function groupEntries(entries) {
+  const groups = [];
+  for (const e of entries) {
+    const name = e.kind === 'note' ? `📝 Note from ${e.speaker}` : e.speaker;
+    const last = groups.at(-1);
+    if (last && last.name === name && last.offTopic === e.offTopic && last.kind === e.kind) last.lines.push(e);
+    else groups.push({ name, kind: e.kind, offTopic: e.offTopic, voice: e.voice, gm: e.gm, color: e.color, lines: [e] });
+  }
+  return groups;
+}
+
+export function transcriptHtml(gid, dir) {
+  const meta = readJSON(path.join(dir, 'meta.json'), {});
+  const { offTopic, voices } = readLabels(dir);
+  const entries = transcriptEntries(sessionLines(dir), readJSON(path.join(dir, 'notes.json'), []), offTopic, voices);
+  const colors = speakerColors(gid, entries.filter((e) => e.kind === 'say').map((e) => e.speaker));
+  for (const e of entries) e.color = e.kind === 'note' ? '#C8CCD4' : colors[baseName(e.speaker)] || '#C8CCD4';
+  const blocks = groupEntries(entries).map((g) => {
+    const tag = g.offTopic ? '<span class="tag">table talk</span>' : '';
+    const rows = g.lines.map((e) => `<div class="ln"><span class="tm">${clock(e.t)}</span>${escHtml(e.text)}</div>`).join('');
+    return `<div class="b${g.offTopic ? ' tt' : ''}${g.kind === 'note' ? ' note' : ''}" style="border-left-color:${g.color}">` +
+      `<div class="n" style="color:${g.color}">${escHtml(g.name)}${tag}</div>${rows}</div>`;
+  }).join('\n');
+  const people = [...new Set(entries.filter((e) => e.kind === 'say').map((e) => baseName(e.speaker)))]
+    .map((n) => `<span class="p"><i style="background:${colors[n]}"></i>${escHtml(n)}</span>`).join('');
+  const tt = entries.filter((e) => e.offTopic).length;
+  return `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>${escHtml(meta.title || 'Transcript')} (${escHtml(meta.date || '')})</title><style>
+body{margin:0;background:#313338;color:#dbdee1;font:15px/1.45 "gg sans","Segoe UI",system-ui,sans-serif}
+main{max-width:860px;margin:0 auto;padding:28px 20px 60px}
+h1{color:#f2f3f5;font-size:22px;margin:0 0 4px}.sub{color:#949ba4;margin-bottom:14px}
+.people{display:flex;flex-wrap:wrap;gap:8px 14px;margin-bottom:12px;color:#b5bac1;font-size:13px}
+.p i{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:6px;vertical-align:0}
+label{color:#b5bac1;font-size:13px;cursor:pointer;display:inline-block;margin-bottom:14px}
+.b{background:#2b2d31;border-left:4px solid;border-radius:4px;padding:8px 14px 10px 12px;margin:4px 0}
+.n{font-weight:600;font-size:14px;margin-bottom:3px}
+.ln{padding:1px 0}.tm{font:12px ui-monospace,Consolas,monospace;background:#1e1f22;color:#b5bac1;border-radius:3px;padding:1px 4px;margin-right:8px}
+.b.tt{opacity:.62}.b.tt .ln{font-style:italic}.b.note{background:#26282c}
+.tag{font-size:11px;font-weight:500;color:#b5bac1;background:#1e1f22;border-radius:99px;padding:1px 7px;margin-left:8px}
+body.hide-tt .b.tt{display:none}
+</style></head><body><main>
+<h1>📜 ${escHtml(meta.title || 'Transcript')}</h1>
+<div class="sub">${escHtml(meta.date || '')}${meta.voiceChannel ? ` · ${escHtml(meta.voiceChannel)}` : ''} · ${entries.length} lines${tt ? ` · ${tt} table talk` : ''} · Note Tiger</div>
+<div class="people">${people}</div>
+${tt ? '<label><input type="checkbox" checked onchange="document.body.classList.toggle(\'hide-tt\',!this.checked)"> Show table talk</label>' : ''}
+${blocks}
+</main></body></html>`;
+}
+
+// data/<server id>/sessions/<session id> -> server id
+export const gidOf = (dir) => path.basename(path.dirname(path.dirname(dir)));
+
+// Writes transcript.txt and transcript.html for a session folder.
+export function writeTranscriptFiles(dir, gid = gidOf(dir)) {
+  const { offTopic, voices } = readLabels(dir);
+  const txt = path.join(dir, 'transcript.txt');
+  const html = path.join(dir, 'transcript.html');
+  fs.writeFileSync(txt, formatTranscript(sessionLines(dir), readJSON(path.join(dir, 'notes.json'), []), offTopic, 'all', voices));
+  fs.writeFileSync(html, transcriptHtml(gid, dir));
+  return { txt, html };
+}

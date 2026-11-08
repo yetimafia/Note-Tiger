@@ -6,7 +6,7 @@ import {
   USE_CLAUDE, ANTHROPIC_API_KEY, CLAUDE_MODEL, OLLAMA_URL, OLLAMA_MODEL, OLLAMA_CONTEXT, CAMPAIGN_NAME, SEPARATE_TABLE_TALK,
 } from './config.js';
 import {
-  listSessions, readJSON, formatTranscript, sessionLines, readLabels, updateLabels, lineKey,
+  listSessions, readJSON, formatTranscript, sessionLines, readLabels, updateLabels, lineKey, writeTranscriptFiles,
 } from './store.js';
 
 const anthropic = USE_CLAUDE ? new Anthropic({ apiKey: ANTHROPIC_API_KEY }) : null;
@@ -230,7 +230,7 @@ export async function recapSession(dir, { prevRecap = null, reclassify = false }
   if (lines.length === 0 && notes.length === 0) throw new Error('That session has no transcript.');
   const offTopic = await classifyTableTalk(dir, { force: reclassify });
   const voices = await attributeVoices(dir, offTopic, { force: reclassify });
-  fs.writeFileSync(path.join(dir, 'transcript.txt'), formatTranscript(lines, notes, offTopic, 'all', voices));
+  writeTranscriptFiles(dir);
   const recap = await writeRecap(
     meta.title, meta.date,
     formatTranscript(lines, notes, offTopic, 'game', voices),

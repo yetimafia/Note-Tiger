@@ -6,7 +6,7 @@ import { fork, exec } from 'node:child_process';
 import {
   APP_DIR, DISCORD_TOKEN, PANEL_PORT, AUTO_START, USE_CLAUDE, OLLAMA_MODEL, CAMPAIGN_NAME, WHISPER_MODEL,
 } from './config.js';
-import { listSessions, readSession, sessionDir, knownGuilds } from './store.js';
+import { listSessions, readSession, sessionDir, knownGuilds, transcriptHtml } from './store.js';
 import { recapSession, askArchive, ollamaStatus, refreshOllama, AI_LABEL } from './ai.js';
 import { startWeb } from './web.js';
 
@@ -148,6 +148,7 @@ startWeb({
     if (liveSessionId(gid) === id) throw new Error('Stop the recording before deleting it.');
     fs.rmSync(dir, { recursive: true, force: true });
   },
+  transcriptHtml(gid, id) { return transcriptHtml(gid, sessionDir(gid, id)); },
   ask(gid, question) { return askArchive(safeGid(gid), question); },
   logs() { return LOG_LINES; },
   setupLocalAI() {
