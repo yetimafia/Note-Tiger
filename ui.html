@@ -102,6 +102,16 @@
       <div id="homeGuilds"></div>
     </div>
     <div class="card">
+      <div class="row" style="justify-content:space-between">
+        <h2 style="margin:0">Activity log</h2>
+        <div class="row">
+          <button class="btn ghost" id="logToggle">Show</button>
+          <button class="btn danger" id="stopBtn" title="Stops the bot. Start it again from the Note Tiger icon.">Stop bot</button>
+        </div>
+      </div>
+      <pre class="transcript" id="logBox" hidden style="margin:12px 0 0;max-height:320px"></pre>
+    </div>
+    <div class="card">
       <h2>Game night cheat sheet</h2>
       <ul class="steps">
         <li>Join a voice channel, then type <code>/session start title:Your title</code> in a text channel.</li>
@@ -273,6 +283,19 @@ function renderHome() {
   } else if (s.guilds.length === 0 && s.inviteUrl) {
     banners += `<div class="banner warn">The bot isn't in any server yet. <a href="${esc(s.inviteUrl)}" target="_blank">Click here to invite it</a>.</div>`;
   }
+  if (s.speech.state === 'loading') {
+    banners += `<div class="banner warn">⏳ Downloading the speech-to-text model (first start only, a few hundred MB). The bot can't transcribe until this finishes.</div>`;
+  } else if (s.speech.state === 'error') {
+    banners += `<div class="banner err">The speech model failed to load: ${esc(s.speech.error)}. Check your internet connection, then restart the bot.</div>`;
+  }
+  if (!s.usingClaude && s.ollama === 'not-running') {
+    banners += `<div class="banner warn"><b>The free local AI isn't running.</b> Recaps need it. If you've installed Ollama, open it from the Start menu. Otherwise:
+      ${s.canInstallLocalAI ? '<button class="btn" style="margin-left:8px" onclick="setupLocalAI(this)">Install free local AI</button>' : 'install Ollama from ollama.com.'}
+      <span class="hint" style="display:block;margin-top:6px">Or switch to Claude in <a href="#settings" onclick="showTab('settings')">Settings</a>.</span></div>`;
+  } else if (!s.usingClaude && s.ollama === 'missing-model') {
+    banners += `<div class="banner warn">Ollama is running but the model <code>${esc(s.ollamaModel)}</code> isn't downloaded yet.
+      ${s.canInstallLocalAI ? '<button class="btn" style="margin-left:8px" onclick="setupLocalAI(this)">Download it</button>' : `Run <code>ollama pull ${esc(s.ollamaModel)}</code>.`}</div>`;
+  }
   const rec = s.guilds.filter((g) => g.recording);
   for (const g of rec) {
     banners += `<div class="banner err">🔴 Recording <b>${esc(g.recording.title)}</b> in ${esc(g.name)}: ${g.recording.minutes} min, ${g.recording.lines} lines transcribed${g.recording.pending ? `, ${g.recording.pending} in progress` : ''}.</div>`;
@@ -282,7 +305,8 @@ function renderHome() {
   const totalSessions = s.guilds.reduce((n, g) => n + g.sessions, 0);
   $('#homeStats').innerHTML = [
     ['Discord', s.online ? 'Connected' : s.hasToken ? 'Not connected' : 'Needs token'],
-    ['Recap AI', s.ai],
+    ['Recap AI', s.ai + (s.usingClaude ? '' : s.ollama === 'ready' ? ' ✓' : ' ⚠')],
+    ['Speech-to-text', { idle: 'Waiting', loading: 'Downloading…', ready: 'Ready ✓', error: 'Error ⚠' }[s.speech.state]],
     ['Sessions recorded', totalSessions],
   ].map(([l, v]) => `<div class="card stat"><div class="label">${l}</div><div class="value">${esc(v)}</div></div>`).join('');
 
@@ -302,6 +326,33 @@ function fillGuildSelects() {
     if (prev && [...sel.options].some((o) => o.value === prev)) sel.value = prev;
   }
 }
+
+async function setupLocalAI(btn) {
+  btn.disabled = true;
+  try { await api('/api/setup-local-ai', { method: 'POST', body: {} }); toast('A setup window opened. It downloads about 6.5 GB, so leave it running.'); }
+  catch (err) { toast(err.message); btn.disabled = false; }
+}
+
+// ---------- activity log ----------
+let logOpen = false;
+$('#logToggle').addEventListener('click', () => {
+  logOpen = !logOpen; $('#logBox').hidden = !logOpen; $('#logToggle').textContent = logOpen ? 'Hide' : 'Show';
+  if (logOpen) refreshLogs();
+});
+async function refreshLogs() {
+  if (!logOpen) return;
+  const lines = await api('/api/logs').catch(() => null);
+  if (!lines) return;
+  const box = $('#logBox'), atBottom = box.scrollTop + box.clientHeight >= box.scrollHeight - 20;
+  box.innerHTML = lines.map((l) => `<span style="color:${l.level === 'error' ? 'var(--red)' : l.level === 'warn' ? 'var(--accent)' : 'inherit'}">[${new Date(l.t).toLocaleTimeString()}] ${esc(l.text)}</span>`).join('\n') || 'Nothing yet.';
+  if (atBottom) box.scrollTop = box.scrollHeight;
+}
+setInterval(refreshLogs, 3000);
+$('#stopBtn').addEventListener('click', async () => {
+  if (!confirm('Stop the bot? Any recording in progress will be saved and recapped first.')) return;
+  await api('/api/stop', { method: 'POST', body: {} }).catch(() => {});
+  toast('Bot stopped. Start it again from the Note Tiger icon.');
+});
 
 // ---------- sessions ----------
 $('#sessGuild').addEventListener('change', () => { currentSession = null; loadSessions(); });

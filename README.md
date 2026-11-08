@@ -15,42 +15,40 @@ Built for Shadowrun, and it works for any game played over Discord voice.
 
 ---
 
-## Install (Windows, about 15 minutes)
+## Install (Windows, about 10 minutes)
 
 ### Step 1: Create your Discord bot
 
 1. Go to the **[Discord Developer Portal](https://discord.com/developers/applications)** and click **New Application**. Give it any name.
 2. Open the **Bot** tab:
-   - Click **Reset Token** and copy the token. You'll paste it into the control panel later. **Keep it secret.**
+   - Click **Reset Token** and copy the token. You'll paste it into Note Tiger in a minute. **Keep it secret.**
    - Scroll to **Privileged Gateway Intents** and turn on **Server Members Intent**. Click **Save Changes**.
 3. Open **OAuth2 → URL Generator**:
    - Under **Scopes**, tick `bot` and `applications.commands`.
    - Under **Bot Permissions**, tick **View Channels**, **Send Messages**, **Attach Files**, **Use Slash Commands**, **Connect** and **Speak**.
    - Copy the URL at the bottom, open it, and add the bot to your server.
 
-### Step 2: Download Note Tiger
+### Step 2: Install Note Tiger
 
-1. On this page, click the green **Code** button, then **Download ZIP**.
-2. Unzip it somewhere **outside OneDrive**, for example `C:\NoteTiger`. OneDrive would otherwise try to sync gigabytes of AI models and your group's transcripts.
+1. Download **`NoteTiger-Setup.exe`** from the **[latest release](../../releases/latest)**.
+2. Run it and click through. No admin rights are needed, and everything it needs (including Node.js) is built in.
+   - Leave **"Free local AI"** ticked if you want free recaps that never leave your PC (downloads about 6.5 GB). Untick it if you'll use a Claude API key.
+   - If Windows shows a blue "Windows protected your PC" box, click **More info → Run anyway**. The installer isn't code-signed yet.
 
-### Step 3: Run the installer
+### Step 3: Start it
 
-Double-click **`install.bat`**. It will:
-- install Node.js if you don't have it (it'll ask you to run it again afterwards)
-- install the bot
-- ask which AI should write recaps:
-  - **1: Free, on your PC** (Ollama). Downloads about 6.5 GB. Works best with an NVIDIA or AMD graphics card.
-  - **2: Claude.** Smarter recaps, pay-as-you-go (usually pennies per session). Needs an API key from [console.anthropic.com](https://console.anthropic.com).
-- download and test the speech-to-text model
+Click **Note Tiger** on your desktop or in the Start menu. A 🐯 icon appears by the clock and the **control panel** opens in your browser.
+Go to **Settings**, paste your Discord token, and click **Save & restart bot**. The dashboard turns green: **online** 🎉
 
-If Windows shows a blue "Windows protected your PC" box, click **More info → Run anyway**. The scripts are plain text, so you can open them in Notepad to see exactly what they do.
+- **Double-click the tiger icon** to reopen the control panel.
+- **Right-click it** to restart the bot, open the log or your data folder, or quit.
+- The first start downloads the speech-to-text model (a few hundred MB). The dashboard shows when it's ready.
 
-### Step 4: Start it
+<details>
+<summary>Prefer not to use the installer? Run from source</summary>
 
-Double-click **`start-bot.bat`**. Your browser opens the **control panel** at <http://localhost:3080>.
-Go to **Settings**, paste your Discord token, and click **Save & restart bot**. The dashboard should turn green: **online** 🎉
-
-> Keep the black `start-bot.bat` window open while you play. Closing it stops the bot.
+Download this repo (green **Code** button → **Download ZIP**), unzip it **outside OneDrive**, then double-click **`install.bat`** followed by **`start-bot.bat`**.
+</details>
 
 ---
 
@@ -80,9 +78,10 @@ In the **control panel** you can also read every recap and transcript, download 
 | **"Discord rejected the token"** | Developer Portal → Bot → **Reset Token**, then paste the new token in Settings. |
 | Slash commands don't show up | Restart Discord (Ctrl+R). Make sure you ticked `applications.commands` when inviting the bot. |
 | **"Could not reach Ollama"** | Open the **Ollama** app (it lives in the system tray by the clock), or run `setup-local-ai.bat` again. |
-| Control panel won't open | Make sure `start-bot.bat` is running, then go to <http://localhost:3080>. |
+| Control panel won't open | Make sure the 🐯 icon is by the clock (start **Note Tiger** from the Start menu), then go to <http://localhost:3080>. |
+| Bot stopped unexpectedly | Right-click the 🐯 icon → **Open log file** to see why, then → **Start bot**. |
 | Transcripts are garbled | Use headsets and push-to-talk or noise suppression. Try the **Medium** Whisper model in Settings if your PC is fast. |
-| Recording stopped working after a Discord update | Close the bot and run `install.bat` again to update the voice libraries. |
+| Recording stopped working after a Discord update | Install the newest release over the top. Your settings and sessions are kept. |
 
 ---
 
@@ -98,11 +97,18 @@ npm run test-speech   # downloads the speech model
 
 ## Where things are saved
 
-Everything stays in the bot folder:
+Everything stays on your PC, in `%LOCALAPPDATA%\Programs\Note Tiger\app` (right-click the 🐯 icon → **Open data folder**):
 - `.env`: your settings and keys (the control panel edits this for you; never share it)
 - `data/`: every session's transcript, notes and recap
+- `models/`: the downloaded speech model
+
+Updating or uninstalling keeps your settings and sessions unless you choose to delete them.
 
 Back up `data/` if you care about your campaign history.
+
+## Building the installer
+
+From Linux (or WSL): `sudo apt install gcc-mingw-w64-x86-64 nsis`, then `./installer/build.sh`. The output is `dist/NoteTiger-Setup-<version>.exe`. The tray launcher's source is in `launcher/`.
 
 ## How it works
 

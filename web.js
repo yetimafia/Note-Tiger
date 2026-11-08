@@ -103,6 +103,19 @@ export function startWeb(ctx, port) {
         }
       }
 
+      // GET /api/logs
+      if (parts[1] === 'logs' && req.method === 'GET') return send(res, 200, ctx.logs());
+
+      // POST /api/setup-local-ai  (opens a window that installs Ollama + the model)
+      if (parts[1] === 'setup-local-ai' && req.method === 'POST') { ctx.setupLocalAI(); return send(res, 200, { ok: true }); }
+
+      // POST /api/stop  (used by the panel's Stop button and the tray app's Quit)
+      if (parts[1] === 'stop' && req.method === 'POST') {
+        send(res, 200, { ok: true });
+        setTimeout(() => ctx.stop(), 300);
+        return;
+      }
+
       // POST /api/restart
       if (parts[1] === 'restart' && req.method === 'POST') {
         send(res, 200, { ok: true });

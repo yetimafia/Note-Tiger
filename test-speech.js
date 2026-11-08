@@ -1,7 +1,11 @@
 // Quick check that the speech model downloads and runs fast enough on this PC.
 // Run with:  npm run test-speech
 import 'dotenv/config';
-import { pipeline } from '@huggingface/transformers';
+import { pipeline, env as hfEnv } from '@huggingface/transformers';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+// Keep downloaded models next to the app so updates don't delete them.
+hfEnv.cacheDir = path.join(path.dirname(fileURLToPath(import.meta.url)), 'models');
 
 const model = process.env.WHISPER_MODEL || 'onnx-community/whisper-small.en';
 const dtype = process.env.WHISPER_DTYPE || 'q8';

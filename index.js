@@ -25,9 +25,22 @@ import {
 } from '@discordjs/voice';
 import prism from 'prism-media';
 import Anthropic from '@anthropic-ai/sdk';
-import { pipeline } from '@huggingface/transformers';
+import { pipeline, env as hfEnv } from '@huggingface/transformers';
 import { exec } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { startWeb } from './web.js';
+
+// ---------- log buffer (shown in the control panel) ----------
+const LOG_LINES = [];
+for (const level of ['log', 'warn', 'error']) {
+  const orig = console[level].bind(console);
+  console[level] = (...args) => {
+    orig(...args);
+    const text = args.map((a) => (a instanceof Error ? a.stack || a.message : typeof a === 'string' ? a : JSON.stringify(a))).join(' ');
+    LOG_LINES.push({ t: Date.now(), level, text: text.slice(0, 2000) });
+    if (LOG_LINES.length > 300) LOG_LINES.shift();
+  };
+}
 
 // ---------- config ----------
 const {
@@ -105,15 +118,21 @@ function toMono16k(pcm48kStereo) {
   return out;
 }
 
+// Keep downloaded models next to the app so updates don't delete them.
+hfEnv.cacheDir = path.join(path.dirname(fileURLToPath(import.meta.url)), 'models');
+
 // ---------- local speech-to-text (Whisper, runs on this computer) ----------
 // The model downloads once (a few hundred MB) on first start, then works offline.
 let whisperPromise = null;
+let whisperState = 'idle'; // idle | loading | ready | error
+let whisperError = null;
 function loadWhisper() {
   if (!whisperPromise) {
+    whisperState = 'loading';
     console.log(`Loading speech model ${WHISPER_MODEL} (first run downloads it, this can take a few minutes)…`);
     whisperPromise = pipeline('automatic-speech-recognition', WHISPER_MODEL, { dtype: WHISPER_DTYPE })
-      .then((p) => { console.log('Speech model ready.'); return p; })
-      .catch((err) => { whisperPromise = null; throw err; });
+      .then((p) => { whisperState = 'ready'; console.log('Speech model ready.'); return p; })
+      .catch((err) => { whisperPromise = null; whisperState = 'error'; whisperError = err.message; throw err; });
   }
   return whisperPromise;
 }
@@ -583,6 +602,26 @@ process.on('SIGINT', async () => {
   process.exit(0);
 });
 
+// ---------- local AI health check (cached for a few seconds) ----------
+let ollamaCache = { t: 0, value: null };
+async function checkOllama() {
+  if (USE_CLAUDE) return null;
+  if (Date.now() - ollamaCache.t < 5000) return ollamaCache.value;
+  let value;
+  try {
+    const res = await fetch(`${OLLAMA_URL}/api/tags`, { signal: AbortSignal.timeout(1500) });
+    const { models = [] } = await res.json();
+    const has = models.some((m) => m.name === OLLAMA_MODEL || m.name === `${OLLAMA_MODEL}:latest` || m.model === OLLAMA_MODEL);
+    value = has ? 'ready' : 'missing-model';
+  } catch {
+    value = 'not-running';
+  }
+  ollamaCache = { t: Date.now(), value };
+  return value;
+}
+checkOllama();
+setInterval(checkOllama, 10_000).unref();
+
 // ---------- control panel ----------
 let loginError = null;
 const RESTART_CODE = 75; // start-bot.bat restarts the bot when it exits with this code
@@ -596,6 +635,10 @@ startWeb({
       loginError,
       ai: USE_CLAUDE ? `Claude (${CLAUDE_MODEL})` : `Local: ${OLLAMA_MODEL} (Ollama)`,
       usingClaude: USE_CLAUDE,
+      ollama: USE_CLAUDE ? null : ollamaCache.value,
+      ollamaModel: OLLAMA_MODEL,
+      speech: { state: whisperState, error: whisperError, model: WHISPER_MODEL },
+      canInstallLocalAI: process.platform === 'win32',
       campaign: CAMPAIGN_NAME,
       inviteUrl: client.user
         ? `https://discord.com/oauth2/authorize?client_id=${client.user.id}&scope=bot%20applications.commands&permissions=2150665216`
@@ -661,6 +704,21 @@ startWeb({
     if (count === 0) return 'No sessions recorded yet.';
     return askAI(ASK_SYSTEM, `ARCHIVE:\n${archive}\n\n---\nQUESTION from the GM: ${question}`, 1500);
   },
+  logs() { return LOG_LINES; },
+  setupLocalAI() {
+    if (process.platform !== 'win32') throw new Error('Automatic setup is Windows-only. Install Ollama from ollama.com, then run: ollama pull ' + OLLAMA_MODEL);
+    const script = path.join(path.dirname(fileURLToPath(import.meta.url)), 'setup-local-ai.bat');
+    if (!fs.existsSync(script)) throw new Error('setup-local-ai.bat is missing from the bot folder.');
+    exec(`start "Note Tiger: local AI setup" cmd /c ""${script}""`, { cwd: path.dirname(script) });
+    ollamaCache.t = 0;
+  },
+  async stop() {
+    for (const [gid, rec] of live) {
+      const guild = client.guilds.cache.get(gid);
+      if (guild) await stopSession(guild, rec.textChannel, 'bot shutting down').catch(() => {});
+    }
+    process.exit(0);
+  },
   async restart() {
     for (const [gid, rec] of live) {
       const guild = client.guilds.cache.get(gid);
@@ -681,6 +739,7 @@ process.on('unhandledRejection', (err) => console.error('[unhandled]', err));
 
 if (!DISCORD_TOKEN) {
   console.log('No Discord token yet. Open the control panel to finish setup.');
+  loadWhisper().catch((e) => console.error('Speech model failed to load:', e.message));
 } else {
   client.login(DISCORD_TOKEN).catch((err) => {
     loginError = /disallowed intents/i.test(err.message)
