@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Note Tiger</title>
+<link rel="icon" href="/favicon.png">
 <style>
   :root {
     --bg: #0d0f14; --panel: #151922; --panel2: #1c212d; --line: #2a3140;
@@ -75,6 +76,16 @@
   .steps li { margin: 4px 0; }
   code { background: var(--panel2); padding: 1px 6px; border-radius: 5px; font-size: 13px; }
   .toast { position: fixed; bottom: 20px; right: 20px; background: var(--panel2); border: 1px solid var(--line); padding: 12px 16px; border-radius: 8px; display: none; z-index: 10; }
+  .power { display: flex; align-items: center; gap: 18px; padding: 22px; }
+  .power .big-dot { width: 18px; height: 18px; border-radius: 50%; background: var(--dim); flex: none; }
+  .power .big-dot.running { background: var(--green); box-shadow: 0 0 14px var(--green); }
+  .power .big-dot.starting, .power .big-dot.stopping { background: var(--accent); animation: pulse 1s infinite; }
+  .power .big-dot.crashed { background: var(--red); }
+  .power .state { font-size: 20px; font-weight: 700; }
+  .power .detail { color: var(--dim); font-size: 14px; margin-top: 2px; }
+  .power .grow { flex: 1; min-width: 0; }
+  button.btn.big { padding: 13px 26px; font-size: 16px; min-width: 150px; }
+  button.btn.stop { background: var(--panel2); color: var(--text); border: 1px solid var(--line); }
   @media (max-width: 800px) { .sessions { grid-template-columns: 1fr; } nav { margin-left: 0; } header { flex-wrap: wrap; } }
 </style>
 </head>
@@ -93,8 +104,15 @@
 <main>
   <!-- DASHBOARD -->
   <section id="tab-home">
-    <h1 id="homeTitle">Dashboard</h1>
-    <p class="sub" id="homeSub"></p>
+    <div class="card power">
+      <div class="big-dot" id="powerDot"></div>
+      <div class="grow">
+        <div class="state" id="powerState">Loading…</div>
+        <div class="detail" id="powerDetail"></div>
+      </div>
+      <button class="btn big" id="powerBtn" disabled>Start bot</button>
+    </div>
+    <p class="sub" id="homeSub" style="margin-top:-4px"></p>
     <div id="homeBanners"></div>
     <div class="grid" id="homeStats"></div>
     <div class="card" style="margin-top:16px">
@@ -106,7 +124,6 @@
         <h2 style="margin:0">Activity log</h2>
         <div class="row">
           <button class="btn ghost" id="logToggle">Show</button>
-          <button class="btn danger" id="stopBtn" title="Stops the bot. Start it again from the Note Tiger icon.">Stop bot</button>
         </div>
       </div>
       <pre class="transcript" id="logBox" hidden style="margin:12px 0 0;max-height:320px"></pre>
@@ -153,7 +170,7 @@
   <!-- SETTINGS -->
   <section id="tab-settings" hidden>
     <h1>Settings</h1>
-    <p class="sub">Saved to the <code>.env</code> file in the bot folder. The bot restarts when you save.</p>
+    <p class="sub">Note Tiger restarts the bot when you save, so the new settings take effect.</p>
     <div class="card">
       <h2>Discord</h2>
       <label for="DISCORD_TOKEN">Bot token</label>
@@ -258,29 +275,64 @@ async function refreshStatus() {
   try {
     status = await api('/api/status');
   } catch {
-    $('#hdrDot').className = 'dot off'; $('#hdrText').textContent = 'Bot not running';
+    $('#hdrDot').className = 'dot off'; $('#hdrText').textContent = 'Reconnecting…';
+    $('#powerState').textContent = 'Note Tiger is restarting…'; $('#powerDetail').textContent = ''; $('#powerBtn').disabled = true;
     return;
   }
   const recording = status.guilds.find((g) => g.recording);
   $('#hdrDot').className = 'dot ' + (recording ? 'rec' : status.online ? 'on' : 'off');
-  $('#hdrText').textContent = recording ? `Recording: ${recording.recording.title}` : status.online ? `Online as ${status.botName}` : 'Offline';
+  $('#hdrText').textContent = recording ? `Recording: ${recording.recording.title}`
+    : status.online ? `Online as ${status.botName}`
+    : { starting: 'Starting…', stopping: 'Stopping…', crashed: 'Bot crashed', running: 'Connecting…' }[status.botState] || 'Bot stopped';
+  renderPower();
   renderHome();
   fillGuildSelects();
 }
 
+let powerBusy = false;
+function renderPower() {
+  const s = status;
+  const st = s.botState;
+  const rec = s.guilds.find((g) => g.recording);
+  const dotClass = st === 'running' && !s.online ? 'starting' : st;
+  $('#powerDot').className = 'big-dot ' + dotClass;
+  let state, detail = '';
+  if (!s.hasToken) { state = 'Not set up yet'; detail = 'Paste your Discord bot token in Settings to get started.'; }
+  else if (st === 'running' && s.online) {
+    state = rec ? `Recording "${rec.recording.title}"` : `${s.botName ? s.botName.split('#')[0] : 'Bot'} is running`;
+    detail = rec ? `${rec.recording.minutes} min · ${rec.recording.lines} lines transcribed` : `Online in Discord · up ${s.uptimeMin} min`;
+  }
+  else if (st === 'running' || st === 'starting') { state = 'Starting…'; detail = 'Connecting to Discord.'; }
+  else if (st === 'stopping') { state = 'Stopping…'; detail = 'Finishing any recording and writing its recap first.'; }
+  else if (st === 'crashed') { state = 'The bot stopped unexpectedly'; detail = s.crash?.hint || 'Open the activity log below to see what happened, then start it again.'; }
+  else { state = 'Bot is stopped'; detail = 'Click Start bot to bring it online in Discord.'; }
+  $('#powerState').textContent = state;
+  $('#powerDetail').innerHTML = esc(detail) + (st === 'crashed' ? ' <a href="#" style="color:var(--accent2)" onclick="openLog();return false">Show activity log</a>' : '');
+  const btn = $('#powerBtn');
+  const running = st === 'running' || st === 'starting';
+  btn.textContent = st === 'stopping' ? 'Stopping…' : running ? 'Stop bot' : 'Start bot';
+  btn.className = 'btn big' + (running ? ' stop' : '');
+  btn.disabled = powerBusy || st === 'stopping' || !s.hasToken;
+}
+
+$('#powerBtn').addEventListener('click', async () => {
+  const running = status.botState === 'running' || status.botState === 'starting';
+  if (running && status.guilds.some((g) => g.recording) && !confirm('A session is recording. Stop the bot? The recording will be saved and recapped first.')) return;
+  powerBusy = true; renderPower();
+  try { await api(running ? '/api/bot/stop' : '/api/bot/start', { method: 'POST', body: {} }); }
+  catch (err) { toast(err.message); }
+  powerBusy = false;
+  await refreshStatus();
+});
+
 function renderHome() {
   const s = status;
-  $('#homeTitle').textContent = s.online ? `${s.botName.split('#')[0]} is online` : 'Dashboard';
-  $('#homeSub').textContent = `Campaign: ${s.campaign}`;
+  $('#homeSub').textContent = `Campaign: ${s.campaign} · Recap AI: ${s.ai}`;
 
   let banners = '';
   if (!s.hasToken) {
     banners += `<div class="banner warn"><b>Almost there!</b> Paste your Discord bot token in <a href="#settings" onclick="showTab('settings')">Settings</a> to bring the bot online.</div>`;
-  } else if (s.loginError) {
-    banners += `<div class="banner err">${esc(s.loginError)}</div>`;
-  } else if (!s.online) {
-    banners += `<div class="banner warn">Connecting to Discord…</div>`;
-  } else if (s.guilds.length === 0 && s.inviteUrl) {
+  } else if (s.online && s.guilds.length === 0 && s.inviteUrl) {
     banners += `<div class="banner warn">The bot isn't in any server yet. <a href="${esc(s.inviteUrl)}" target="_blank">Click here to invite it</a>.</div>`;
   }
   if (s.speech.state === 'loading') {
@@ -304,7 +356,6 @@ function renderHome() {
 
   const totalSessions = s.guilds.reduce((n, g) => n + g.sessions, 0);
   $('#homeStats').innerHTML = [
-    ['Discord', s.online ? 'Connected' : s.hasToken ? 'Not connected' : 'Needs token'],
     ['Recap AI', s.ai + (s.usingClaude ? '' : s.ollama === 'ready' ? ' ✓' : ' ⚠')],
     ['Speech-to-text', { idle: 'Waiting', loading: 'Downloading…', ready: 'Ready ✓', error: 'Error ⚠' }[s.speech.state]],
     ['Sessions recorded', totalSessions],
@@ -315,7 +366,7 @@ function renderHome() {
         <div><b>${esc(g.name)}</b> <span class="hint">${g.sessions} session${g.sessions === 1 ? '' : 's'}</span></div>
         <div>${g.recording ? '<span class="tag live">REC</span>' : ''}</div></div>`).join('') +
       (s.inviteUrl ? `<p class="hint" style="margin-bottom:0">Add to another server: <a style="color:var(--accent2)" href="${esc(s.inviteUrl)}" target="_blank">invite link</a></p>` : '')
-    : `<div class="hint">${s.online ? 'No servers yet.' : 'Connect the bot to see your servers.'}</div>`;
+    : `<div class="hint">${s.online ? 'No servers yet.' : 'Start the bot to see your servers.'}</div>`;
 }
 
 function fillGuildSelects() {
@@ -348,11 +399,10 @@ async function refreshLogs() {
   if (atBottom) box.scrollTop = box.scrollHeight;
 }
 setInterval(refreshLogs, 3000);
-$('#stopBtn').addEventListener('click', async () => {
-  if (!confirm('Stop the bot? Any recording in progress will be saved and recapped first.')) return;
-  await api('/api/stop', { method: 'POST', body: {} }).catch(() => {});
-  toast('Bot stopped. Start it again from the Note Tiger icon.');
-});
+function openLog() {
+  if (!logOpen) $('#logToggle').click();
+  $('#logBox').scrollIntoView({ behavior: 'smooth' });
+}
 
 // ---------- sessions ----------
 $('#sessGuild').addEventListener('change', () => { currentSession = null; loadSessions(); });

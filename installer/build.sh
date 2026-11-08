@@ -6,7 +6,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 ROOT=$PWD
 VERSION=$(node -p "require('./package.json').version")
-NODE_VERSION=${NODE_VERSION:-24.22.2}
+NODE_VERSION=${NODE_VERSION:-26.13.0}
 BUILD=$ROOT/build
 STAGE=$BUILD/stage
 OUT=$ROOT/dist/NoteTiger-Setup-$VERSION.exe
@@ -23,7 +23,7 @@ fi
 cp "$BUILD/node-$NODE_VERSION.exe" "$STAGE/runtime/node.exe"
 
 echo "==> App files"
-cp index.js web.js ui.html package.json package-lock.json test-speech.js setup-local-ai.bat .env.example "$STAGE/app/"
+cp server.js index.js config.js store.js ai.js web.js ui.html tiger.png package.json package-lock.json test-speech.js setup-local-ai.bat .env.example "$STAGE/app/"
 
 echo "==> Windows packages"
 (cd "$STAGE/app" && npm ci --os=win32 --cpu=x64 --ignore-scripts --omit=dev --no-audit --no-fund --loglevel=error)
@@ -32,12 +32,21 @@ for d in "$STAGE"/app/node_modules/onnxruntime-node/bin/napi-v*/; do
   rm -rf "$d/darwin" "$d/linux" "$d/win32/arm64"
 done
 rm -rf "$STAGE"/app/node_modules/@types
+# Windows ships an older onnxruntime.dll in System32. Put the speech engine's own DLLs next to node.exe,
+# which Windows searches first, so the right version is always loaded.
+cp "$STAGE"/app/node_modules/onnxruntime-node/bin/napi-v6/win32/x64/*.dll "$STAGE/runtime/"
 
 echo "==> Launcher"
 (cd launcher \
   && x86_64-w64-mingw32-windres launcher.rc -O coff -o "$BUILD/launcher.res" \
   && x86_64-w64-mingw32-gcc -O2 -s -municode -mwindows -DUNICODE -D_UNICODE launcher.c "$BUILD/launcher.res" \
        -o "$STAGE/Note Tiger.exe" -lshell32 -lwinhttp -luser32 -static-libgcc)
+
+echo "==> Window"
+(cd window \
+  && x86_64-w64-mingw32-windres window.rc -O coff -o rsrc_windows_amd64.syso \
+  && GOOS=windows GOARCH=amd64 GOFLAGS=-mod=mod GOPROXY=${GOPROXY:-direct} GOSUMDB=off \
+     go build -trimpath -ldflags "-H windowsgui -s -w" -o "$STAGE/Note Tiger Window.exe" .)
 
 echo "==> Installer"
 (cd installer && makensis -V2 -DVERSION="$VERSION" -DSTAGE="$STAGE" -DOUTFILE="$OUT" installer.nsi)

@@ -73,6 +73,11 @@ export function startWeb(ctx, port) {
     const url = new URL(req.url, 'http://localhost');
     const parts = url.pathname.split('/').filter(Boolean);
     try {
+      if (url.pathname === '/favicon.png') {
+        const icon = path.join(here, 'tiger.png');
+        if (fs.existsSync(icon)) return send(res, 200, fs.readFileSync(icon), 'image/png');
+        return send(res, 404, { error: 'Not found' });
+      }
       if (url.pathname === '/' || url.pathname === '/index.html') {
         return send(res, 200, fs.readFileSync(path.join(here, 'ui.html'), 'utf8'), 'text/html; charset=utf-8');
       }
@@ -109,10 +114,16 @@ export function startWeb(ctx, port) {
       // POST /api/setup-local-ai  (opens a window that installs Ollama + the model)
       if (parts[1] === 'setup-local-ai' && req.method === 'POST') { ctx.setupLocalAI(); return send(res, 200, { ok: true }); }
 
-      // POST /api/stop  (used by the panel's Stop button and the tray app's Quit)
+      // POST /api/bot/start, /api/bot/stop
+      if (parts[1] === 'bot' && req.method === 'POST') {
+        if (parts[2] === 'start') { ctx.startBot(); return send(res, 200, { ok: true }); }
+        if (parts[2] === 'stop') { await ctx.stopBot(); return send(res, 200, { ok: true }); }
+      }
+
+      // POST /api/stop  (quit Note Tiger completely: tray "Quit" and the installer use this)
       if (parts[1] === 'stop' && req.method === 'POST') {
         send(res, 200, { ok: true });
-        setTimeout(() => ctx.stop(), 300);
+        setTimeout(() => ctx.quit(), 100);
         return;
       }
 
@@ -159,8 +170,11 @@ export function startWeb(ctx, port) {
   });
 
   server.on('error', (err) => {
-    if (err.code === 'EADDRINUSE') console.error(`Control panel: port ${port} is busy (is the bot already running in another window?)`);
-    else console.error('Control panel error:', err.message);
+    if (err.code === 'EADDRINUSE') {
+      console.error(`Port ${port} is already in use. Is Note Tiger (or the old start-bot.bat window) already running? Close it and try again.`);
+      process.exit(3);
+    }
+    console.error('Control panel error:', err.message);
   });
   server.listen(port, '127.0.0.1', () => console.log(`Control panel: http://localhost:${port}`));
   return server;

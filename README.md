@@ -7,7 +7,7 @@ Built for Shadowrun, and it works for any game played over Discord voice.
 - 🎙️ Joins your voice channel muted and transcribes everyone at the table
 - 📼 Posts a recap when you're done: the job, NPCs, places, loot and nuyen, consequences, loose threads, best quotes
 - 🧠 Answers questions about past sessions: *"What did Mr. Johnson offer us for the Ares job?"*
-- 🖥️ A control panel in your browser, so there's no digging through files
+- 🖥️ A proper Windows app: a Note Tiger window with **Start / Stop bot**, sessions, questions and settings, plus a 🐯 tray icon so you know it's running
 - 💸 **Free by default:** speech-to-text and the recap AI can both run on your own PC. Nothing gets uploaded.
 
 ![Dashboard](docs/dashboard.png)
@@ -37,17 +37,18 @@ Built for Shadowrun, and it works for any game played over Discord voice.
 
 ### Step 3: Start it
 
-Click **Note Tiger** on your desktop or in the Start menu. A 🐯 icon appears by the clock and the **control panel** opens in your browser.
-Go to **Settings**, paste your Discord token, and click **Save & restart bot**. The dashboard turns green: **online** 🎉
+Click **Note Tiger** on your desktop or in the Start menu. The **Note Tiger window** opens and a 🐯 icon appears by the clock.
+Go to **Settings**, paste your Discord token, and click **Save**. Then press **Start bot** on the Dashboard. It turns green: **online** 🎉
 
-- **Double-click the tiger icon** to reopen the control panel.
-- **Right-click it** to restart the bot, open the log or your data folder, or quit.
+- **Start bot / Stop bot** is the big button at the top of the Dashboard.
+- Closing the window doesn't stop the bot. **Double-click the tiger icon** to open it again.
+- **Right-click the tiger icon** to start or stop the bot, open the log or your data folder, or quit Note Tiger.
 - The first start downloads the speech-to-text model (a few hundred MB). The dashboard shows when it's ready.
 
 <details>
 <summary>Prefer not to use the installer? Run from source</summary>
 
-Download this repo (green **Code** button → **Download ZIP**), unzip it **outside OneDrive**, then double-click **`install.bat`** followed by **`start-bot.bat`**.
+Download this repo (green **Code** button → **Download ZIP**), unzip it **outside OneDrive**, then double-click **`install.bat`** followed by **`start-bot.bat`**. The panel opens in your browser at <http://localhost:3080>.
 </details>
 
 ---
@@ -78,8 +79,9 @@ In the **control panel** you can also read every recap and transcript, download 
 | **"Discord rejected the token"** | Developer Portal → Bot → **Reset Token**, then paste the new token in Settings. |
 | Slash commands don't show up | Restart Discord (Ctrl+R). Make sure you ticked `applications.commands` when inviting the bot. |
 | **"Could not reach Ollama"** | Open the **Ollama** app (it lives in the system tray by the clock), or run `setup-local-ai.bat` again. |
-| Control panel won't open | Make sure the 🐯 icon is by the clock (start **Note Tiger** from the Start menu), then go to <http://localhost:3080>. |
-| Bot stopped unexpectedly | Right-click the 🐯 icon → **Open log file** to see why, then → **Start bot**. |
+| Window won't open | Make sure the 🐯 icon is by the clock (start **Note Tiger** from the Start menu), then double-click it. |
+| "The bot stopped unexpectedly" | The Dashboard shows why. Click **Show activity log** for details, then **Start bot**. |
+| "Another copy is already running" | Close the old black `start-bot.bat` window, then start Note Tiger again. |
 | Transcripts are garbled | Use headsets and push-to-talk or noise suppression. Try the **Medium** Whisper model in Settings if your PC is fast. |
 | Recording stopped working after a Discord update | Install the newest release over the top. Your settings and sessions are kept. |
 
@@ -108,7 +110,12 @@ Back up `data/` if you care about your campaign history.
 
 ## Building the installer
 
-From Linux (or WSL): `sudo apt install gcc-mingw-w64-x86-64 nsis`, then `./installer/build.sh`. The output is `dist/NoteTiger-Setup-<version>.exe`. The tray launcher's source is in `launcher/`.
+From Linux (or WSL): `sudo apt install gcc-mingw-w64-x86-64 nsis` plus Go 1.24+, then `./installer/build.sh`. The output is `dist/NoteTiger-Setup-<version>.exe`.
+
+- `launcher/`: `Note Tiger.exe`, the tray icon, which keeps the manager running
+- `window/`: `Note Tiger Window.exe`, the app window (WebView2)
+- `server.js`: the manager, which serves the window's UI and starts/stops the bot
+- `index.js`: the bot (Discord, voice, transcription); `ai.js`, `store.js`, `config.js` are shared
 
 ## How it works
 

@@ -35,7 +35,7 @@ VIAddVersionKey "LegalCopyright" "yetimafia"
 !define MUI_COMPONENTSPAGE_SMALLDESC
 !define MUI_FINISHPAGE_RUN "$INSTDIR\Note Tiger.exe"
 !define MUI_FINISHPAGE_RUN_TEXT "Start Note Tiger now"
-!define MUI_FINISHPAGE_TEXT "Note Tiger is installed.$\r$\n$\r$\nWhen it starts, a tiger icon appears by the clock and the control panel opens in your browser. Paste your Discord bot token in Settings and you're ready.$\r$\n$\r$\nThe first start downloads the speech model (a few hundred MB)."
+!define MUI_FINISHPAGE_TEXT "Note Tiger is installed.$\r$\n$\r$\nThe Note Tiger window opens, and a tiger icon by the clock shows it's running. Paste your Discord bot token in Settings and click Start bot.$\r$\n$\r$\nThe first start downloads the speech model (a few hundred MB)."
 
 !insertmacro MUI_PAGE_WELCOME
 !insertmacro MUI_PAGE_COMPONENTS
@@ -61,9 +61,11 @@ Section "Note Tiger (required)" SecMain
   SetOutPath "$INSTDIR"
   File "..\launcher\tiger.ico"
   File "${STAGE}\Note Tiger.exe"
+  File "${STAGE}\Note Tiger Window.exe"
 
+  RMDir /r "$INSTDIR\runtime"
   SetOutPath "$INSTDIR\runtime"
-  File "${STAGE}\runtime\node.exe"
+  File "${STAGE}\runtime\*.*"
 
   ; Replace the app code but keep the user's settings (.env), sessions (data\) and downloaded models.
   RMDir /r "$INSTDIR\app\node_modules"
@@ -116,6 +118,9 @@ Section "Uninstall"
   RMDir /r "$SMPROGRAMS\Note Tiger"
 
   Delete "$INSTDIR\Note Tiger.exe"
+  Delete "$INSTDIR\Note Tiger Window.exe"
+  RMDir /r "$LOCALAPPDATA\NoteTiger\WebView2"
+  RMDir "$LOCALAPPDATA\NoteTiger"
   Delete "$INSTDIR\tiger.ico"
   RMDir /r "$INSTDIR\runtime"
   RMDir /r "$INSTDIR\app\node_modules"
@@ -123,6 +128,7 @@ Section "Uninstall"
   RMDir /r "$INSTDIR\app\logs"
   Delete "$INSTDIR\app\*.js"
   Delete "$INSTDIR\app\*.html"
+  Delete "$INSTDIR\app\*.png"
   Delete "$INSTDIR\app\*.json"
   Delete "$INSTDIR\app\*.bat"
   Delete "$INSTDIR\app\.env.example"

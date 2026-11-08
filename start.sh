@@ -2,7 +2,7 @@
 # Mac/Linux: start the bot (restarts automatically when you save settings in the panel).
 cd "$(dirname "$0")"
 while true; do
-  node index.js
+  node server.js
   code=$?
   [ "$code" -eq 75 ] || exit "$code"
   export NT_RESTARTED=1

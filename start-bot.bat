@@ -10,7 +10,7 @@ if not exist node_modules (
 echo Starting Note Tiger... (close this window to stop the bot)
 echo Control panel: http://localhost:3080
 echo.
-node index.js
+node server.js
 if "%errorlevel%"=="75" goto restart
 echo.
 echo The bot stopped.
