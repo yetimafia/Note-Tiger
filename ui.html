@@ -143,7 +143,7 @@
         <li>Join a voice channel, then type <code>/session start title:Your title</code> in a text channel.</li>
         <li>Players: <code>/character name:RunnerName</code> once, so recaps use runner names.</li>
         <li><code>/note text:…</code> adds anything important said in text chat.</li>
-        <li><code>/session stop</code> at the end. The recap posts in a minute or two and shows up here under Sessions.</li>
+        <li><code>/session stop</code> at the end. The recap posts in <b>#recaps</b> a minute or two later, the full transcript in <b>#logs</b>, and both show up here under Sessions.</li>
         <li><code>/ask question:…</code> in Discord, or use the Ask tab here.</li>
       </ul>
     </div>
@@ -185,6 +185,13 @@
       <label for="DISCORD_TOKEN">Bot token</label>
       <input type="password" id="DISCORD_TOKEN" autocomplete="off" placeholder="">
       <div class="hint">Developer Portal → your app → Bot → Reset Token. Leave empty to keep the saved one.</div>
+      <div class="grid" style="gap:12px">
+        <div><label for="RECAP_CHANNEL">Recap channel</label>
+          <input type="text" id="RECAP_CHANNEL" placeholder="recaps"></div>
+        <div><label for="LOG_CHANNEL">Transcript channel</label>
+          <input type="text" id="LOG_CHANNEL" placeholder="logs"></div>
+      </div>
+      <div class="hint">After each session the recap goes to <b>#recaps</b> and the full transcript to <b>#logs</b> (or whatever you name them here). Create the channels in Discord. If one doesn't exist, the bot posts in the channel where you typed <code>/session stop</code>.</div>
       <label for="CAMPAIGN_NAME">Campaign name</label>
       <input type="text" id="CAMPAIGN_NAME" placeholder="our Shadowrun campaign">
       <div class="hint">Used in recaps, e.g. "Seattle 2081".</div>
@@ -521,6 +528,8 @@ async function loadSettings() {
   $('#ANTHROPIC_API_KEY').value = '';
   $('#ANTHROPIC_API_KEY').placeholder = s.ANTHROPIC_API_KEY.set ? '•••••••• saved' : 'sk-ant-…';
   for (const k of ['CAMPAIGN_NAME', 'CLAUDE_MODEL', 'OLLAMA_MODEL']) $('#' + k).value = s[k];
+  $('#LOG_CHANNEL').value = s.LOG_CHANNEL || 'logs';
+  $('#RECAP_CHANNEL').value = s.RECAP_CHANNEL || 'recaps';
   $('#SEPARATE_TABLE_TALK').checked = s.SEPARATE_TABLE_TALK !== 'false';
   const w = $('#WHISPER_MODEL');
   if (s.WHISPER_MODEL && ![...w.options].some((o) => o.value === s.WHISPER_MODEL)) w.add(new Option(s.WHISPER_MODEL, s.WHISPER_MODEL));
@@ -538,6 +547,8 @@ $('#saveBtn').addEventListener('click', async () => {
     OLLAMA_MODEL: $('#OLLAMA_MODEL').value,
     WHISPER_MODEL: $('#WHISPER_MODEL').value,
     SEPARATE_TABLE_TALK: $('#SEPARATE_TABLE_TALK').checked ? 'true' : 'false',
+    LOG_CHANNEL: $('#LOG_CHANNEL').value.replace(/^#/, '').trim() || 'logs',
+    RECAP_CHANNEL: $('#RECAP_CHANNEL').value.replace(/^#/, '').trim() || 'recaps',
     ANTHROPIC_API_KEY: ai === 'claude' ? $('#ANTHROPIC_API_KEY').value : '',
   };
   if (ai === 'local') body.clear_ANTHROPIC_API_KEY = true; // no key = local AI

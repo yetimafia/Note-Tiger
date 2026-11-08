@@ -5,7 +5,7 @@
 Built for Shadowrun, and it works for any game played over Discord voice.
 
 - 🎙️ Joins your voice channel muted and transcribes everyone at the table
-- 📼 Posts a recap when you're done: the job, NPCs, places, loot and nuyen, consequences, loose threads, best quotes
+- 📼 Posts a recap when you're done (in **#recaps**): the job, NPCs, places, loot and nuyen, consequences, loose threads, best quotes. The full transcript goes to **#logs**
 - 🍕 Keeps off-topic table talk out of the recap. It stays in the transcript (dimmed), and the best jokes can still make **Best Lines**
 - 🧠 Answers questions about past sessions: *"What did Mr. Johnson offer us for the Ares job?"*
 - 🖥️ A proper Windows app: a Note Tiger window with **Start / Stop bot**, sessions, questions and settings, plus a 🐯 tray icon so you know it's running
@@ -61,7 +61,7 @@ Download this repo (green **Code** button → **Download ZIP**), unzip it **outs
 | `/session start title:The Renraku Job` | The bot joins your voice channel and starts transcribing. It posts a 🔴 notice. |
 | `/character name:Ghost` | Each player runs this once, so recaps use runner names. |
 | `/note text:Ghost owes Twitch a favor` | Adds something from text chat to the session. |
-| `/session stop` | Posts the recap (a minute or two later) with the transcript attached. |
+| `/session stop` | A minute or two later, posts the recap in **#recaps** and the full transcript in **#logs**. Create those two text channels (or pick other names in Settings); if they don't exist, both go to the channel you typed in. |
 | `/ask question:Who was the decker in Redmond?` | Answers from all recorded sessions. |
 | `/recap` | Re-posts the latest recap. |
 | `/optout mode:on` | The bot won't record that person's voice. |

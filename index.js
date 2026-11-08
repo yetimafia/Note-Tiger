@@ -21,9 +21,10 @@ import {
 } from '@discordjs/voice';
 import prism from 'prism-media';
 import { pipeline, env as hfEnv } from '@huggingface/transformers';
-import { DISCORD_TOKEN, WHISPER_MODEL, WHISPER_DTYPE, MODELS_DIR } from './config.js';
+import { DISCORD_TOKEN, WHISPER_MODEL, WHISPER_DTYPE, MODELS_DIR, LOG_CHANNEL, RECAP_CHANNEL } from './config.js';
 import {
   readJSON, writeJSON, sessionsDir, getSettings, saveSettings, listSessions, readLines, saveGuildName,
+  sessionLines, readTableTalk, formatTranscript,
 } from './store.js';
 import { askAI, recapSession, buildArchive, ASK_SYSTEM, AI_LABEL } from './ai.js';
 
@@ -244,17 +245,80 @@ async function stopSession(guild, channel, reason) {
   const prevRecap = prev && fs.existsSync(path.join(prev.dir, 'recap.md'))
     ? fs.readFileSync(path.join(prev.dir, 'recap.md'), 'utf8') : null;
 
-  let recap;
+  let recap = null;
   try {
     recap = await recapSession(rec.dir, { prevRecap });
   } catch (err) {
     console.error('[recap]', err);
     await channel.send(`The recap failed (${err.message}), but the transcript was saved. Fix that and run \`/recap\`.`);
-    return;
   }
-  await sendLong(channel, `# ${rec.meta.title} — ${rec.meta.date}\n${recap}`, [
-    new AttachmentBuilder(path.join(rec.dir, 'transcript.txt'), { name: `transcript-${rec.meta.date}.txt` }),
-  ]);
+
+  // The recap goes to #recaps and the full transcript to #logs (falling back to this channel).
+  const recapChannel = findChannel(guild, RECAP_CHANNEL);
+  const logChannel = findChannel(guild, LOG_CHANNEL);
+  const transcriptFile = writeTranscriptFile(rec.dir);
+  const attachment = () => new AttachmentBuilder(transcriptFile, { name: `transcript-${rec.meta.date}.txt` });
+  const tips = [];
+
+  let logPosted = null;
+  if (logChannel) {
+    try {
+      const tableTalk = readTableTalk(rec.dir).size;
+      await logChannel.send({
+        content: `📜 **Transcript: ${rec.meta.title}** (${rec.meta.date}) · ${lines.length} lines` +
+          (tableTalk ? ` · ${tableTalk} marked as table talk` : ''),
+        files: [attachment()],
+      });
+      logPosted = logChannel;
+    } catch (err) {
+      console.error(`[logs] couldn't post in #${logChannel.name}:`, err.message);
+      tips.push(`I couldn't post in <#${logChannel.id}>. Check that I can send messages and attach files there.`);
+    }
+  } else if (LOG_CHANNEL) {
+    tips.push(`Create a text channel called **#${LOG_CHANNEL}** and I'll post transcripts there.`);
+  }
+
+  let recapPosted = null;
+  if (recap) {
+    const pointer = logPosted ? `\n\n*Full transcript in <#${logPosted.id}>.*` : '';
+    const files = logPosted ? [] : [attachment()];
+    const text = `# ${rec.meta.title} — ${rec.meta.date}\n${recap}${pointer}`;
+    if (recapChannel) {
+      try { await sendLong(recapChannel, text, files); recapPosted = recapChannel; }
+      catch (err) {
+        console.error(`[recaps] couldn't post in #${recapChannel.name}:`, err.message);
+        tips.push(`I couldn't post in <#${recapChannel.id}>. Check that I can send messages and attach files there.`);
+      }
+    } else if (RECAP_CHANNEL) {
+      tips.push(`Create a text channel called **#${RECAP_CHANNEL}** and I'll post recaps there.`);
+    }
+    if (!recapPosted) { await sendLong(channel, text, files); recapPosted = channel; }
+  } else if (!logPosted) {
+    await channel.send({ files: [attachment()] });
+  }
+
+  // Short note where the command was used, so people know where to look.
+  const where = [];
+  if (recapPosted && recapPosted.id !== channel.id) where.push(`recap in <#${recapPosted.id}>`);
+  if (logPosted && logPosted.id !== channel.id) where.push(`transcript in <#${logPosted.id}>`);
+  const note = [where.length ? `✅ Done: ${where.join(', ')}.` : '', ...tips.map((t) => `*${t}*`)].filter(Boolean).join('\n');
+  if (note) await channel.send(note).catch(() => {});
+}
+
+// A text channel by name (from Settings), if the bot can see it.
+function findChannel(guild, name) {
+  if (!name) return null;
+  return guild.channels.cache.find((c) => c.isTextBased?.() && !c.isThread?.() && !c.isVoiceBased?.() &&
+    c.name.toLowerCase() === name && c.permissionsFor(guild.members.me)?.has('ViewChannel')) ?? null;
+}
+
+// transcript.txt is normally written during the recap; make sure it exists even if that failed.
+function writeTranscriptFile(dir) {
+  const file = path.join(dir, 'transcript.txt');
+  if (!fs.existsSync(file)) {
+    fs.writeFileSync(file, formatTranscript(sessionLines(dir), readJSON(path.join(dir, 'notes.json'), []), readTableTalk(dir)));
+  }
+  return file;
 }
 
 // ---------- slash commands ----------

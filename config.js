@@ -22,6 +22,11 @@ export const PANEL_PORT = Number(e.PANEL_PORT || 3080);
 export const AUTO_START = e.AUTO_START !== 'false';
 // Tag off-topic table talk so it stays out of the recap (but can still make Best Lines).
 export const SEPARATE_TABLE_TALK = e.SEPARATE_TABLE_TALK !== 'false';
+// Text channels for the recap and the full transcript (if a channel doesn't exist, the bot posts
+// where /session stop was used instead).
+const channelName = (v, fallback) => (v ?? fallback).replace(/^#/, '').trim().toLowerCase();
+export const RECAP_CHANNEL = channelName(e.RECAP_CHANNEL, 'recaps');
+export const LOG_CHANNEL = channelName(e.LOG_CHANNEL, 'logs');
 
 // With a Claude key the bot uses Claude; without one it uses a local model through Ollama.
 export const USE_CLAUDE = Boolean(ANTHROPIC_API_KEY);

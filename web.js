@@ -17,6 +17,8 @@ export const SETTINGS = [
   { key: 'OLLAMA_MODEL' },
   { key: 'WHISPER_MODEL' },
   { key: 'SEPARATE_TABLE_TALK' },
+  { key: 'LOG_CHANNEL' },
+  { key: 'RECAP_CHANNEL' },
 ];
 
 function readEnvLines() {
