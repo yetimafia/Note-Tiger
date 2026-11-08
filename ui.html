@@ -86,13 +86,13 @@
   .power .grow { flex: 1; min-width: 0; }
   button.btn.big { padding: 13px 26px; font-size: 16px; min-width: 150px; }
   button.btn.stop { background: var(--panel2); color: var(--text); border: 1px solid var(--line); }
-  .tline { padding: 2px 0; }
+  .tline { padding: 3px 0 3px 10px; border-left: 3px solid transparent; margin: 1px 0; }
   .tline .who { font-weight: 600; }
   .tline .tm { color: var(--dim); margin-right: 6px; }
   .tline.tt { color: var(--dim); }
+  .tline.tt .who { opacity: .6; }
   .tline.tt .who { font-weight: 500; }
   .tline.note { color: var(--accent2); }
-  .tline.gm .who { color: var(--accent); }
   .tag.voice { background: #2a2110; color: #ffd48a; border: 1px solid #5c4413; margin: 0 6px 0 0; }
   .tag.voice.narr { background: #10242a; color: #9be7ef; border-color: #1f4f5c; }
   .tag.tt { background: var(--panel2); color: var(--dim); border: 1px solid var(--line); margin: 0 6px 0 0; }
@@ -503,7 +503,7 @@ function renderTranscript(s) {
   const clock = (t) => new Date(t).toTimeString().slice(0, 5);
   const rows = s.entries.map((e) => e.kind === 'note'
     ? `<div class="tline note"><span class="tm">${clock(e.t)}</span>📝 <span class="who">${esc(e.speaker)}</span>: ${esc(e.text)}</div>`
-    : `<div class="tline ${e.offTopic ? 'tt' : ''} ${e.gm ? 'gm' : ''}"><span class="tm">${clock(e.t)}</span>${e.offTopic ? '<span class="tag tt">table talk</span>' : ''}${voiceTag(e)}<span class="who">${esc(e.gm ? e.speaker.replace(/\s*\(GM( as [^)]*)?\)$/, '') + ' (GM)' : e.speaker)}</span>: ${esc(e.text)}</div>`).join('');
+    : `<div class="tline ${e.offTopic ? 'tt' : ''} ${e.gm ? 'gm' : ''}" style="${e.color ? `border-left:3px solid ${e.color}${e.offTopic ? '55' : ''}` : ''}"><span class="tm">${clock(e.t)}</span>${e.offTopic ? '<span class="tag tt">table talk</span>' : ''}${voiceTag(e)}<span class="who" style="${e.color ? `color:${e.color}` : ''}">${esc(e.gm ? e.speaker.replace(/\s*\(GM( as [^)]*)?\)$/, '') + ' (GM)' : e.speaker)}</span>: ${esc(e.text)}</div>`).join('');
   const toggle = s.tableTalkLines
     ? `<label class="switch" style="margin-bottom:8px"><input type="checkbox" id="ttToggle" ${showTableTalk ? 'checked' : ''}> Show table talk (${s.tableTalkLines} line${s.tableTalkLines === 1 ? '' : 's'}, dimmed)</label>`
     : '';

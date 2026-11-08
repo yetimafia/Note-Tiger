@@ -18,6 +18,30 @@ const settingsFile = (gid) => path.join(guildDir(gid), 'settings.json');
 export const getSettings = (gid) => readJSON(settingsFile(gid), { characters: {}, optout: [] });
 export const saveSettings = (gid, s) => writeJSON(settingsFile(gid), s);
 
+// ---------- speaker colors (pastels, same color for a person every session) ----------
+export const PASTELS = [
+  '#FFB3BA', '#BAE1FF', '#BAFFC9', '#FFDFBA', '#D7BAFF', '#FFFFBA',
+  '#FFC8E8', '#B5EAD7', '#C9F0FF', '#E2F0CB', '#F3C4FB', '#FFD8B1',
+];
+// "Seth (GM as Mr. Johnson)" -> "Seth"
+export const baseName = (speaker) => String(speaker).replace(/\s*\([^)]*\)\s*$/, '').trim();
+
+export function speakerColors(gid, names) {
+  const s = getSettings(gid);
+  s.colors ||= {};
+  let changed = false;
+  for (const raw of names) {
+    const name = baseName(raw);
+    if (!name || name in s.colors) continue;
+    const used = new Set(Object.values(s.colors));
+    const free = PASTELS.findIndex((c) => !used.has(c));
+    s.colors[name] = PASTELS[free >= 0 ? free : Object.keys(s.colors).length % PASTELS.length];
+    changed = true;
+  }
+  if (changed) saveSettings(gid, s);
+  return s.colors;
+}
+
 // Folder and server ids come from the control panel's URLs, so only allow safe characters.
 const SAFE_ID = /^[\w.-]+$/;
 export function sessionDir(gid, id) {
@@ -112,13 +136,16 @@ export function readSession(gid, id) {
   const lines = sessionLines(dir);
   const notes = readJSON(path.join(dir, 'notes.json'), []);
   const { offTopic, voices } = readLabels(dir);
+  const entries = transcriptEntries(lines, notes, offTopic, voices);
+  const colors = speakerColors(gid, entries.filter((e) => e.kind === 'say').map((e) => e.speaker));
+  for (const e of entries) e.color = colors[baseName(e.speaker)] || null;
   return {
     ...meta,
     id,
     dir,
     recap: fs.existsSync(recapFile) ? fs.readFileSync(recapFile, 'utf8') : null,
     transcript: formatTranscript(lines, notes, offTopic, 'all', voices),
-    entries: transcriptEntries(lines, notes, offTopic, voices),
+    entries,
     tableTalkLines: offTopic.size,
   };
 }

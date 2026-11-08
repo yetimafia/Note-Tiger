@@ -14,7 +14,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {
-  Client, GatewayIntentBits, SlashCommandBuilder, AttachmentBuilder, MessageFlags,
+  Client, GatewayIntentBits, SlashCommandBuilder, AttachmentBuilder, MessageFlags, EmbedBuilder,
 } from 'discord.js';
 import {
   joinVoiceChannel, EndBehaviorType, VoiceConnectionStatus, entersState, getVoiceConnection,
@@ -24,7 +24,7 @@ import { pipeline, env as hfEnv } from '@huggingface/transformers';
 import { DISCORD_TOKEN, WHISPER_MODEL, WHISPER_DTYPE, MODELS_DIR, LOG_CHANNEL, RECAP_CHANNEL, GM_ROLES } from './config.js';
 import {
   readJSON, writeJSON, sessionsDir, getSettings, saveSettings, listSessions, readLines, saveGuildName,
-  sessionLines, readTableTalk, readLabels, formatTranscript,
+  sessionLines, readTableTalk, readLabels, formatTranscript, transcriptEntries, speakerColors, baseName,
 } from './store.js';
 import { askAI, recapSession, buildArchive, ASK_SYSTEM, AI_LABEL } from './ai.js';
 
@@ -278,6 +278,7 @@ async function stopSession(guild, channel, reason) {
         files: [attachment()],
       });
       logPosted = logChannel;
+      await postColorLog(logChannel, guild.id, rec.dir).catch((err) => console.error('[logs] color log:', err.message));
     } catch (err) {
       console.error(`[logs] couldn't post in #${logChannel.name}:`, err.message);
       tips.push(`I couldn't post in <#${logChannel.id}>. Check that I can send messages and attach files there.`);
@@ -311,6 +312,42 @@ async function stopSession(guild, channel, reason) {
   if (logPosted && logPosted.id !== channel.id) where.push(`transcript in <#${logPosted.id}>`);
   const note = [where.length ? `✅ Done: ${where.join(', ')}.` : '', ...tips.map((t) => `*${t}*`)].filter(Boolean).join('\n');
   if (note) await channel.send(note).catch(() => {});
+}
+
+// The conversation as color-coded blocks: one pastel color per person, grouped by who's talking.
+async function postColorLog(logChannel, gid, dir) {
+  const { offTopic, voices } = readLabels(dir);
+  const entries = transcriptEntries(sessionLines(dir), readJSON(path.join(dir, 'notes.json'), []), offTopic, voices);
+  if (!entries.length) return;
+  const colors = speakerColors(gid, entries.filter((e) => e.kind === 'say').map((e) => e.speaker));
+  const clock = (t) => new Date(t).toTimeString().slice(0, 5);
+  const hex = (c) => parseInt(String(c || '#C8CCD4').slice(1), 16);
+
+  // Group consecutive lines from the same speaker (and same voice / table-talk state).
+  const groups = [];
+  for (const e of entries) {
+    const name = e.kind === 'note' ? `📝 Note from ${e.speaker}` : e.offTopic ? `${e.speaker} · table talk` : e.speaker;
+    const line = `\`${clock(e.t)}\` ${e.offTopic ? `*${e.text}*` : e.text}`;
+    const last = groups.at(-1);
+    if (last && last.name === name && last.text.length + line.length < 3800) last.text += `\n${line}`;
+    else groups.push({ name, text: line, color: e.kind === 'note' ? '#C8CCD4' : colors[baseName(e.speaker)] });
+  }
+
+  // Discord allows 10 embeds and 6000 characters per message.
+  const messages = [];
+  let cur = [], size = 0;
+  for (const g of groups) {
+    const len = g.name.length + g.text.length;
+    if (cur.length && (cur.length === 10 || size + len > 5800)) { messages.push(cur); cur = []; size = 0; }
+    cur.push(new EmbedBuilder().setAuthor({ name: g.name.slice(0, 250) }).setDescription(g.text.slice(0, 4000)).setColor(hex(g.color)));
+    size += len;
+  }
+  if (cur.length) messages.push(cur);
+  if (messages.length > 150) {
+    await logChannel.send('*This session is too long to show color-coded here. The full transcript is in the file above.*');
+    return;
+  }
+  for (const embeds of messages) await logChannel.send({ embeds });
 }
 
 // A text channel by name (from Settings), if the bot can see it.
