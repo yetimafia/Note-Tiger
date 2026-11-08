@@ -7,3 +7,5 @@ models/
 logs/
 build/
 dist/
+launcher/*.exe
+launcher/*.res
