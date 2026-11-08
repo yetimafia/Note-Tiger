@@ -3,9 +3,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 import Anthropic from '@anthropic-ai/sdk';
 import {
-  USE_CLAUDE, ANTHROPIC_API_KEY, CLAUDE_MODEL, OLLAMA_URL, OLLAMA_MODEL, OLLAMA_CONTEXT, CAMPAIGN_NAME,
+  USE_CLAUDE, ANTHROPIC_API_KEY, CLAUDE_MODEL, OLLAMA_URL, OLLAMA_MODEL, OLLAMA_CONTEXT, CAMPAIGN_NAME, SEPARATE_TABLE_TALK,
 } from './config.js';
-import { listSessions, readLines, readJSON, formatTranscript } from './store.js';
+import {
+  listSessions, readJSON, writeJSON, formatTranscript, sessionLines, readTableTalk, lineKey,
+} from './store.js';
 
 const anthropic = USE_CLAUDE ? new Anthropic({ apiKey: ANTHROPIC_API_KEY }) : null;
 export const AI_LABEL = USE_CLAUDE ? `Claude (${CLAUDE_MODEL})` : `Local: ${OLLAMA_MODEL} (Ollama)`;
@@ -14,8 +16,8 @@ export const AI_LABEL = USE_CLAUDE ? `Claude (${CLAUDE_MODEL})` : `Local: ${OLLA
 const ASK_CHAR_BUDGET = USE_CLAUDE ? 600_000 : 30_000;
 const RECAP_CHUNK_CHARS = USE_CLAUDE ? 600_000 : 24_000;
 
-export async function askAI(system, user, maxTokens = 4000) {
-  if (!USE_CLAUDE) return askOllama(system, user, maxTokens);
+export async function askAI(system, user, maxTokens = 4000, { json = false } = {}) {
+  if (!USE_CLAUDE) return askOllama(system, user, maxTokens, json);
   const msg = await anthropic.messages.create({
     model: CLAUDE_MODEL,
     max_tokens: maxTokens,
@@ -25,7 +27,7 @@ export async function askAI(system, user, maxTokens = 4000) {
   return msg.content.filter((b) => b.type === 'text').map((b) => b.text).join('\n').trim();
 }
 
-async function askOllama(system, user, maxTokens) {
+async function askOllama(system, user, maxTokens, json = false) {
   let res;
   try {
     res = await fetch(`${OLLAMA_URL}/api/chat`, {
@@ -35,7 +37,8 @@ async function askOllama(system, user, maxTokens) {
         model: OLLAMA_MODEL,
         stream: false,
         messages: [{ role: 'system', content: system }, { role: 'user', content: user }],
-        options: { num_ctx: OLLAMA_CONTEXT, num_predict: maxTokens, temperature: 0.4 },
+        ...(json ? { format: 'json' } : {}),
+        options: { num_ctx: OLLAMA_CONTEXT, num_predict: maxTokens, temperature: json ? 0 : 0.4 },
       }),
     });
   } catch {
@@ -67,12 +70,86 @@ List, as short bullet points, only what happened in the game: events, decisions,
 the job and payment, nuyen/karma/loot, injuries and consequences, open leads, and any very memorable quotes.
 Skip out-of-character chatter. Do not invent anything.`;
 
+// ---------- table talk ----------
+const TABLE_TALK_SYSTEM = `You sort lines from a speech-to-text transcript of a Shadowrun tabletop RPG session.
+Each line starts with an id like L12. Find the stretches of OFF-TOPIC TABLE TALK: conversation that has nothing to do
+with the game, such as real life, work, food, other games, movies, sports, tech problems, or jokes unrelated to the game.
+
+These are NOT table talk (they count as the game): anything said in character, the GM narrating or voicing NPCs,
+players deciding what their characters do, dice rolls and results, rules questions, planning the run, and
+jokes about what's happening in the game.
+
+Answer with JSON only, in this exact shape: {"offTopic": [[first_id, last_id], ...]}
+Use the numbers from the ids. A single line is [n, n]. If there is no table talk, answer {"offTopic": []}.
+When unsure, treat the line as part of the game.`;
+
+function parseRanges(text) {
+  const match = text.match(/\{[\s\S]*\}/);
+  if (!match) return [];
+  try {
+    const ranges = JSON.parse(match[0]).offTopic;
+    return Array.isArray(ranges) ? ranges : [];
+  } catch {
+    return [];
+  }
+}
+
+// Tags off-topic lines and saves them to labels.json. Reuses the saved result unless the transcript changed.
+export async function classifyTableTalk(dir, { force = false } = {}) {
+  const lines = sessionLines(dir);
+  const labelsFile = path.join(dir, 'labels.json');
+  const saved = readJSON(labelsFile, null);
+  if (!force && saved && saved.lineCount === lines.length) return new Set(saved.offTopic);
+  if (!SEPARATE_TABLE_TALK || lines.length === 0) return new Set();
+
+  const offTopic = new Set();
+  const chunkChars = USE_CLAUDE ? 120_000 : 14_000;
+  let start = 0;
+  while (start < lines.length) {
+    let end = start, size = 0;
+    while (end < lines.length && (size < chunkChars || end === start)) { size += lines[end].text.length + 30; end++; }
+    const numbered = lines.slice(start, end).map((l, i) => `L${start + i} ${l.speaker}: ${l.text}`).join('\n');
+    console.log(`[table talk] checking lines ${start + 1}–${end} of ${lines.length}`);
+    try {
+      const answer = await askAI(TABLE_TALK_SYSTEM, numbered, 1500, { json: true });
+      for (const range of parseRanges(answer)) {
+        const [a, b] = (Array.isArray(range) ? range : [range, range]).map(Number);
+        if (!Number.isFinite(a)) continue;
+        for (let i = Math.max(a, start); i <= Math.min(Number.isFinite(b) ? b : a, end - 1); i++) offTopic.add(lineKey(lines[i]));
+      }
+    } catch (err) {
+      console.error('[table talk] skipped a part:', err.message);
+    }
+    start = end;
+  }
+  writeJSON(labelsFile, { lineCount: lines.length, offTopic: [...offTopic] });
+  console.log(`[table talk] ${offTopic.size} of ${lines.length} lines are table talk`);
+  return offTopic;
+}
+
+// ---------- recaps ----------
+// Table talk lines worth considering for Best Lines (short and punchy), within a size budget.
+function tableTalkCandidates(tableText, budget) {
+  const picks = tableText.split('\n').filter((l) => {
+    const said = l.replace(/^\[[^\]]*\]\s*[^:]+:\s*/, '');
+    return said.length >= 15 && said.length <= 220;
+  });
+  let out = '';
+  for (const l of picks) { if (out.length + l.length > budget) break; out += l + '\n'; }
+  return out.trim();
+}
+
+const TABLE_TALK_NOTE = `TABLE TALK (off-topic chatter, not part of the game). Do NOT use it for anything in the recap except
+the Best Lines section. Mark any quote you take from it with "(table talk)".`;
+
 // Long sessions are too big for a local model in one go, so: notes per chunk, then one recap from the notes.
-export async function writeRecap(title, date, transcriptText, prevRecap) {
+async function writeRecap(title, date, gameText, tableText, prevRecap) {
   const prevPart = prevRecap ? `For context, here is the PREVIOUS session's recap:\n${prevRecap}\n\n---\n\n` : '';
-  const chunks = chunkText(transcriptText, RECAP_CHUNK_CHARS);
+  const head = `${prevPart}Session title: ${title} (${date})\n\n`;
+  const tablePart = tableText ? `\n\n---\n${TABLE_TALK_NOTE}\n${tableTalkCandidates(tableText, USE_CLAUDE ? 60_000 : 6_000)}` : '';
+  const chunks = chunkText(gameText || '(no in-game talk was transcribed)', RECAP_CHUNK_CHARS);
   if (chunks.length === 1) {
-    return askAI(RECAP_SYSTEM, `${prevPart}Session title: ${title} (${date})\n\nTRANSCRIPT:\n${transcriptText}`, 6000);
+    return askAI(RECAP_SYSTEM, `${head}GAME TRANSCRIPT:\n${gameText}${tablePart}`, 6000);
   }
   const notes = [];
   for (let i = 0; i < chunks.length; i++) {
@@ -81,17 +158,35 @@ export async function writeRecap(title, date, transcriptText, prevRecap) {
       await askAI(CHUNK_NOTES_SYSTEM, `TRANSCRIPT PART ${i + 1}:\n${chunks[i]}`, 1200));
   }
   return askAI(RECAP_SYSTEM,
-    `${prevPart}Session title: ${title} (${date})\n\nThe transcript was long, so here are notes taken from it in order ` +
-    `(treat them as the transcript):\n\n${notes.join('\n\n')}`, 4000);
+    `${head}The game transcript was long, so here are notes taken from it in order ` +
+    `(treat them as the game transcript):\n\n${notes.join('\n\n')}${tablePart}`, 4000);
+}
+
+// Tags table talk, writes transcript.txt and recap.md for a session folder, and returns the recap.
+export async function recapSession(dir, { prevRecap = null, reclassify = false } = {}) {
+  const meta = readJSON(path.join(dir, 'meta.json'), {});
+  const lines = sessionLines(dir);
+  const notes = readJSON(path.join(dir, 'notes.json'), []);
+  if (lines.length === 0 && notes.length === 0) throw new Error('That session has no transcript.');
+  const offTopic = await classifyTableTalk(dir, { force: reclassify });
+  fs.writeFileSync(path.join(dir, 'transcript.txt'), formatTranscript(lines, notes, offTopic));
+  const recap = await writeRecap(
+    meta.title, meta.date,
+    formatTranscript(lines, notes, offTopic, 'game'),
+    offTopic.size ? formatTranscript(lines, [], offTopic, 'table') : '',
+    prevRecap,
+  );
+  fs.writeFileSync(path.join(dir, 'recap.md'), recap);
+  return recap;
 }
 
 export const RECAP_SYSTEM = `You are the campaign scribe for ${CAMPAIGN_NAME}, a Shadowrun tabletop RPG game.
-You get a raw speech-to-text transcript of one session. It is messy: speech recognition errors, crosstalk,
-and lots of out-of-character table talk (snacks, rules lookups, jokes). Speaker labels look like
-"Player (Runner name)". The GM usually narrates and voices NPCs.
+You get a raw speech-to-text transcript of one session (the GAME TRANSCRIPT). It is messy: speech recognition
+errors and crosstalk. Speaker labels look like "Player (Runner name)". The GM usually narrates and voices NPCs.
+Off-topic table talk has been separated out; if present it comes after, under TABLE TALK.
 
-Write a recap the players will enjoy reading and can rely on later. Focus on what happened in the fiction.
-Use Discord markdown, and these sections (skip any that have nothing in them):
+Write a recap the players will enjoy reading and can rely on later. Focus on what happened in the fiction,
+using only the game transcript. Use Discord markdown, and these sections (skip any that have nothing in them):
 
 **📼 The Run So Far** — 2–4 paragraph narrative recap, a little noir flavor, but accurate.
 **🕴️ The Job** — who hired the team (Mr. Johnson), the objective, the pay offered/negotiated.
@@ -100,10 +195,11 @@ Use Discord markdown, and these sections (skip any that have nothing in them):
 **💰 Payouts & Loot** — nuyen, karma, gear, paydata gained or spent.
 **🩸 Consequences** — injuries, heat, burned contacts, enemies made, essence loss.
 **🧵 Loose Threads** — open questions, leads, promises made, things to follow up next session.
-**💬 Best Lines** — up to 3 memorable quotes (only if clearly funny or dramatic).
+**💬 Best Lines** — up to 3 of the funniest or most dramatic quotes of the night, as "quote" — Speaker.
+They can come from the game OR the table talk; mark table-talk quotes with (table talk).
 
 Rules: never invent facts. If something is unclear from the transcript, say it's unclear rather than guessing.
-Ignore rules arguments and off-topic chatter unless it changed something in the game.`;
+Never mention anything from the table talk outside Best Lines. Ignore rules arguments unless they changed something in the game.`;
 
 export const ASK_SYSTEM = `You are the campaign scribe for ${CAMPAIGN_NAME}, a Shadowrun tabletop RPG game.
 You have the archive of past sessions: recaps and raw speech-to-text transcripts (which contain recognition
@@ -122,9 +218,9 @@ export function buildArchive(gid) {
 
   for (let i = sessions.length - 1; i >= 0; i--) {
     const s = sessions[i];
-    const lines = readLines(path.join(s.dir, 'transcript.jsonl'));
-    const notes = readJSON(path.join(s.dir, 'notes.json'), []);
-    const block = `\n\n=== Session ${i + 1}: ${s.title} (${s.date}) — TRANSCRIPT ===\n${formatTranscript(lines, notes)}`;
+    // Table talk is left out so questions are answered from what happened in the game.
+    const transcript = formatTranscript(sessionLines(s.dir), readJSON(path.join(s.dir, 'notes.json'), []), readTableTalk(s.dir), 'game');
+    const block = `\n\n=== Session ${i + 1}: ${s.title} (${s.date}) — TRANSCRIPT ===\n${transcript}`;
     if (out.length + block.length > ASK_CHAR_BUDGET) break;
     out += block;
   }

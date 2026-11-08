@@ -16,6 +16,7 @@ export const SETTINGS = [
   { key: 'CLAUDE_MODEL' },
   { key: 'OLLAMA_MODEL' },
   { key: 'WHISPER_MODEL' },
+  { key: 'SEPARATE_TABLE_TALK' },
 ];
 
 function readEnvLines() {

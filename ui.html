@@ -86,6 +86,15 @@
   .power .grow { flex: 1; min-width: 0; }
   button.btn.big { padding: 13px 26px; font-size: 16px; min-width: 150px; }
   button.btn.stop { background: var(--panel2); color: var(--text); border: 1px solid var(--line); }
+  .tline { padding: 2px 0; }
+  .tline .who { font-weight: 600; }
+  .tline .tm { color: var(--dim); margin-right: 6px; }
+  .tline.tt { color: var(--dim); }
+  .tline.tt .who { font-weight: 500; }
+  .tline.note { color: var(--accent2); }
+  .tag.tt { background: var(--panel2); color: var(--dim); border: 1px solid var(--line); margin: 0 6px 0 0; }
+  .transcript.hide-tt .tline.tt { display: none; }
+  .switch { display: flex; align-items: center; gap: 8px; font-weight: 400; margin: 0; cursor: pointer; }
   @media (max-width: 800px) { .sessions { grid-template-columns: 1fr; } nav { margin-left: 0; } header { flex-wrap: wrap; } }
 </style>
 </head>
@@ -199,6 +208,12 @@
         <input type="text" id="OLLAMA_MODEL" placeholder="llama3.1:8b">
         <div class="hint">Must be downloaded in Ollama first (run <code>setup-local-ai.bat</code>, or <code>ollama pull name</code>).</div>
       </div>
+    </div>
+
+    <div class="card">
+      <h2>Table talk</h2>
+      <label class="switch"><input type="checkbox" id="SEPARATE_TABLE_TALK"> Keep off-topic chatter out of the recap</label>
+      <div class="hint">The AI tags conversation that isn't about the game (real life, other games, food…). It stays in the transcript, dimmed, and can still make <b>Best Lines</b>, but the recap and questions only use the game.</div>
     </div>
 
     <div class="card">
@@ -373,7 +388,10 @@ function fillGuildSelects() {
   for (const id of ['#sessGuild', '#askGuild']) {
     const sel = $(id), prev = sel.value;
     const opts = status.guilds.map((g) => `<option value="${g.id}">${esc(g.name)}</option>`).join('');
-    if (sel.dataset.opts !== opts) { sel.innerHTML = opts || '<option value="">No servers</option>'; sel.dataset.opts = opts; }
+    if (sel.dataset.opts !== opts) {
+      sel.innerHTML = opts || '<option value="">No servers</option>'; sel.dataset.opts = opts;
+      if (id === '#sessGuild' && !$('#tab-sessions').hidden) loadSessions();
+    }
     if (prev && [...sel.options].some((o) => o.value === prev)) sel.value = prev;
   }
 }
@@ -432,18 +450,20 @@ async function openSession(id, view = 'recap') {
   const dur = s.endedAt ? Math.round((new Date(s.endedAt) - new Date(s.startedAt)) / 60000) : null;
   $('#sessView').innerHTML = `
     <h1>${esc(s.title)}</h1>
-    <div class="hint">${esc(s.date)}${s.voiceChannel ? ` · ${esc(s.voiceChannel)}` : ''}${dur != null ? ` · ${Math.floor(dur / 60)}h ${dur % 60}m` : ''}</div>
+    <div class="hint">${esc(s.date)}${s.voiceChannel ? ` · ${esc(s.voiceChannel)}` : ''}${dur != null ? ` · ${Math.floor(dur / 60)}h ${dur % 60}m` : ''}${s.tableTalkLines ? ` · ${s.tableTalkLines} lines of table talk kept out of the recap` : ''}</div>
     <div class="tabs2">
       <button class="btn ${view === 'recap' ? '' : 'ghost'}" data-v="recap">Recap</button>
       <button class="btn ${view === 'transcript' ? '' : 'ghost'}" data-v="transcript">Transcript</button>
       <span style="flex:1"></span>
       <button class="btn ghost" id="dlBtn">Download transcript</button>
-      <button class="btn ghost" id="regenBtn">${s.recap ? 'Rewrite recap' : 'Write recap'}</button>
+      <button class="btn ghost" id="regenBtn" title="Re-checks table talk and writes the recap again">${s.recap ? 'Rewrite recap' : 'Write recap'}</button>
       <button class="btn danger" id="delBtn">Delete</button>
     </div>
     <div id="sessBody">${view === 'recap'
       ? (s.recap ? `<div class="recap">${md(s.recap)}</div>` : '<div class="empty">No recap yet. Click "Write recap".</div>')
-      : (s.transcript ? `<pre class="transcript">${esc(s.transcript)}</pre>` : '<div class="empty">No transcript.</div>')}</div>`;
+      : renderTranscript(s)}</div>`;
+  const ttToggle = $('#ttToggle');
+  if (ttToggle) ttToggle.onchange = () => { showTableTalk = ttToggle.checked; $('#tbox').classList.toggle('hide-tt', !showTableTalk); };
   $('#sessView').querySelectorAll('[data-v]').forEach((b) => b.addEventListener('click', () => openSession(id, b.dataset.v)));
   $('#dlBtn').onclick = () => { location.href = `/api/sessions/${gid}/${encodeURIComponent(id)}/transcript`; };
   $('#regenBtn').onclick = async (e) => {
@@ -457,6 +477,19 @@ async function openSession(id, view = 'recap') {
     try { await api(`/api/sessions/${gid}/${encodeURIComponent(id)}`, { method: 'DELETE' }); toast('Deleted.'); currentSession = null; loadSessions(); }
     catch (err) { toast(err.message); }
   };
+}
+
+let showTableTalk = true;
+function renderTranscript(s) {
+  if (!s.entries || !s.entries.length) return '<div class="empty">No transcript.</div>';
+  const clock = (t) => new Date(t).toTimeString().slice(0, 5);
+  const rows = s.entries.map((e) => e.kind === 'note'
+    ? `<div class="tline note"><span class="tm">${clock(e.t)}</span>📝 <span class="who">${esc(e.speaker)}</span>: ${esc(e.text)}</div>`
+    : `<div class="tline ${e.offTopic ? 'tt' : ''}"><span class="tm">${clock(e.t)}</span>${e.offTopic ? '<span class="tag tt">table talk</span>' : ''}<span class="who">${esc(e.speaker)}</span>: ${esc(e.text)}</div>`).join('');
+  const toggle = s.tableTalkLines
+    ? `<label class="switch" style="margin-bottom:8px"><input type="checkbox" id="ttToggle" ${showTableTalk ? 'checked' : ''}> Show table talk (${s.tableTalkLines} lines, dimmed)</label>`
+    : '';
+  return `${toggle}<div class="transcript ${showTableTalk ? '' : 'hide-tt'}" id="tbox" style="white-space:normal;background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:14px;max-height:60vh;overflow:auto;font-size:13px">${rows}</div>`;
 }
 
 // ---------- ask ----------
@@ -488,6 +521,7 @@ async function loadSettings() {
   $('#ANTHROPIC_API_KEY').value = '';
   $('#ANTHROPIC_API_KEY').placeholder = s.ANTHROPIC_API_KEY.set ? '•••••••• saved' : 'sk-ant-…';
   for (const k of ['CAMPAIGN_NAME', 'CLAUDE_MODEL', 'OLLAMA_MODEL']) $('#' + k).value = s[k];
+  $('#SEPARATE_TABLE_TALK').checked = s.SEPARATE_TABLE_TALK !== 'false';
   const w = $('#WHISPER_MODEL');
   if (s.WHISPER_MODEL && ![...w.options].some((o) => o.value === s.WHISPER_MODEL)) w.add(new Option(s.WHISPER_MODEL, s.WHISPER_MODEL));
   w.value = s.WHISPER_MODEL || 'onnx-community/whisper-small.en';
@@ -503,6 +537,7 @@ $('#saveBtn').addEventListener('click', async () => {
     CLAUDE_MODEL: $('#CLAUDE_MODEL').value,
     OLLAMA_MODEL: $('#OLLAMA_MODEL').value,
     WHISPER_MODEL: $('#WHISPER_MODEL').value,
+    SEPARATE_TABLE_TALK: $('#SEPARATE_TABLE_TALK').checked ? 'true' : 'false',
     ANTHROPIC_API_KEY: ai === 'claude' ? $('#ANTHROPIC_API_KEY').value : '',
   };
   if (ai === 'local') body.clear_ANTHROPIC_API_KEY = true; // no key = local AI

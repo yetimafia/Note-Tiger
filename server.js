@@ -6,8 +6,8 @@ import { fork, exec } from 'node:child_process';
 import {
   APP_DIR, DISCORD_TOKEN, PANEL_PORT, AUTO_START, USE_CLAUDE, OLLAMA_MODEL, CAMPAIGN_NAME, WHISPER_MODEL,
 } from './config.js';
-import { listSessions, readSession, sessionDir, knownGuilds, formatTranscript, readLines, readJSON } from './store.js';
-import { writeRecap, askArchive, ollamaStatus, refreshOllama, AI_LABEL } from './ai.js';
+import { listSessions, readSession, sessionDir, knownGuilds } from './store.js';
+import { recapSession, askArchive, ollamaStatus, refreshOllama, AI_LABEL } from './ai.js';
 import { startWeb } from './web.js';
 
 const RESTART_CODE = 75; // the launcher restarts the manager when it exits with this code
@@ -140,12 +140,8 @@ startWeb({
   async regenerateRecap(gid, id) {
     const dir = sessionDir(gid, id);
     if (liveSessionId(gid) === id) throw new Error('That session is still recording.');
-    const meta = readJSON(path.join(dir, 'meta.json'), {});
-    const text = formatTranscript(readLines(path.join(dir, 'transcript.jsonl')), readJSON(path.join(dir, 'notes.json'), []));
-    if (!text) throw new Error('That session has no transcript.');
-    const recap = await writeRecap(meta.title, meta.date, text, null);
-    fs.writeFileSync(path.join(dir, 'recap.md'), recap);
-    return recap;
+    // Rewriting also re-checks which parts were table talk.
+    return recapSession(dir, { reclassify: true });
   },
   deleteSession(gid, id) {
     const dir = sessionDir(gid, id);

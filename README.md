@@ -6,6 +6,7 @@ Built for Shadowrun, and it works for any game played over Discord voice.
 
 - 🎙️ Joins your voice channel muted and transcribes everyone at the table
 - 📼 Posts a recap when you're done: the job, NPCs, places, loot and nuyen, consequences, loose threads, best quotes
+- 🍕 Keeps off-topic table talk out of the recap. It stays in the transcript (dimmed), and the best jokes can still make **Best Lines**
 - 🧠 Answers questions about past sessions: *"What did Mr. Johnson offer us for the Ares job?"*
 - 🖥️ A proper Windows app: a Note Tiger window with **Start / Stop bot**, sessions, questions and settings, plus a 🐯 tray icon so you know it's running
 - 💸 **Free by default:** speech-to-text and the recap AI can both run on your own PC. Nothing gets uploaded.

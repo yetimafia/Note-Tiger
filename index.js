@@ -23,9 +23,9 @@ import prism from 'prism-media';
 import { pipeline, env as hfEnv } from '@huggingface/transformers';
 import { DISCORD_TOKEN, WHISPER_MODEL, WHISPER_DTYPE, MODELS_DIR } from './config.js';
 import {
-  readJSON, writeJSON, sessionsDir, getSettings, saveSettings, listSessions, readLines, formatTranscript, saveGuildName,
+  readJSON, writeJSON, sessionsDir, getSettings, saveSettings, listSessions, readLines, saveGuildName,
 } from './store.js';
-import { askAI, writeRecap, buildArchive, ASK_SYSTEM, AI_LABEL } from './ai.js';
+import { askAI, recapSession, buildArchive, ASK_SYSTEM, AI_LABEL } from './ai.js';
 
 console.log(`Starting bot. Recap AI: ${AI_LABEL}`);
 const MIN_UTTERANCE_SEC = 0.6;   // ignore coughs and clicks
@@ -234,9 +234,6 @@ async function stopSession(guild, channel, reason) {
   rec.meta.lineCount = lines.length;
   writeJSON(path.join(rec.dir, 'meta.json'), rec.meta);
 
-  const transcriptText = formatTranscript(lines, notes);
-  fs.writeFileSync(path.join(rec.dir, 'transcript.txt'), transcriptText);
-
   if (lines.length === 0 && notes.length === 0) {
     await channel.send('I didn\'t catch any speech this time, so there\'s no recap.');
     return;
@@ -249,14 +246,12 @@ async function stopSession(guild, channel, reason) {
 
   let recap;
   try {
-    recap = await writeRecap(rec.meta.title, rec.meta.date, transcriptText, prevRecap);
+    recap = await recapSession(rec.dir, { prevRecap });
   } catch (err) {
     console.error('[recap]', err);
     await channel.send(`The recap failed (${err.message}), but the transcript was saved. Fix that and run \`/recap\`.`);
     return;
   }
-  fs.writeFileSync(path.join(rec.dir, 'recap.md'), recap);
-
   await sendLong(channel, `# ${rec.meta.title} — ${rec.meta.date}\n${recap}`, [
     new AttachmentBuilder(path.join(rec.dir, 'transcript.txt'), { name: `transcript-${rec.meta.date}.txt` }),
   ]);
@@ -360,10 +355,8 @@ client.on('interactionCreate', async (interaction) => {
       let recap = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : null;
       if (!recap) {
         // Recap failed or never ran — try to build it now from the saved transcript.
-        const text = formatTranscript(readLines(path.join(s.dir, 'transcript.jsonl')), readJSON(path.join(s.dir, 'notes.json'), []));
-        if (!text) return interaction.editReply('That session has no transcript.');
-        recap = await writeRecap(s.title, s.date, text, null);
-        fs.writeFileSync(file, recap);
+        try { recap = await recapSession(s.dir); }
+        catch (err) { return interaction.editReply(err.message); }
       }
       const parts = splitForDiscord(`# ${s.title} — ${s.date}\n${recap}`);
       await interaction.editReply(parts[0]);

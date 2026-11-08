@@ -20,6 +20,8 @@ export const DATA_DIR = path.resolve(APP_DIR, e.DATA_DIR || 'data');
 export const MODELS_DIR = path.join(APP_DIR, 'models');
 export const PANEL_PORT = Number(e.PANEL_PORT || 3080);
 export const AUTO_START = e.AUTO_START !== 'false';
+// Tag off-topic table talk so it stays out of the recap (but can still make Best Lines).
+export const SEPARATE_TABLE_TALK = e.SEPARATE_TABLE_TALK !== 'false';
 
 // With a Claude key the bot uses Claude; without one it uses a local model through Ollama.
 export const USE_CLAUDE = Boolean(ANTHROPIC_API_KEY);

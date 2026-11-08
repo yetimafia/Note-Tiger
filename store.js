@@ -42,20 +42,37 @@ export function readLines(file) {
   return fs.readFileSync(file, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l));
 }
 
-
-export function formatTranscript(lines, notes = []) {
-  const all = [
-    ...lines.map((l) => ({ ...l, kind: 'say' })),
-    ...notes.map((n) => ({ ...n, kind: 'note' })),
-  ].sort((a, b) => a.t - b.t);
-  return all.map((l) => {
-    const time = new Date(l.t).toTimeString().slice(0, 5);
-    return l.kind === 'note'
-      ? `[${time}] NOTE from ${l.speaker}: ${l.text}`
-      : `[${time}] ${l.speaker}: ${l.text}`;
-  }).join('\n');
+// Transcript lines in the order they were spoken (they're written as transcription finishes).
+export function sessionLines(dir) {
+  return readLines(path.join(dir, 'transcript.jsonl')).sort((a, b) => a.t - b.t);
 }
 
+export const lineKey = (l) => `${l.t}:${l.speaker}`;
+
+// Which lines the AI tagged as off-topic table talk (saved in labels.json).
+export function readTableTalk(dir) {
+  return new Set(readJSON(path.join(dir, 'labels.json'), {}).offTopic || []);
+}
+
+const clock = (t) => new Date(t).toTimeString().slice(0, 5);
+
+// Spoken lines + /note entries, in time order, each marked if it's table talk.
+export function transcriptEntries(lines, notes = [], offTopic = new Set()) {
+  return [
+    ...lines.map((l) => ({ t: l.t, kind: 'say', speaker: l.speaker, text: l.text, offTopic: offTopic.has(lineKey(l)) })),
+    ...notes.map((n) => ({ t: n.t, kind: 'note', speaker: n.speaker, text: n.text, offTopic: false })),
+  ].sort((a, b) => a.t - b.t);
+}
+
+// mode: 'all' (table talk marked), 'game' (table talk left out), 'table' (only table talk)
+export function formatTranscript(lines, notes = [], offTopic = new Set(), mode = 'all') {
+  return transcriptEntries(lines, notes, offTopic)
+    .filter((e) => (mode === 'game' ? !e.offTopic : mode === 'table' ? e.offTopic : true))
+    .map((e) => (e.kind === 'note'
+      ? `[${clock(e.t)}] NOTE from ${e.speaker}: ${e.text}`
+      : `[${clock(e.t)}] ${mode === 'all' && e.offTopic ? '(table talk) ' : ''}${e.speaker}: ${e.text}`))
+    .join('\n');
+}
 
 // Server names are remembered so sessions can be browsed while the bot is offline.
 export function saveGuildName(gid, name) {
@@ -73,11 +90,16 @@ export function readSession(gid, id) {
   const dir = sessionDir(gid, id);
   const meta = readJSON(path.join(dir, 'meta.json'), {});
   const recapFile = path.join(dir, 'recap.md');
+  const lines = sessionLines(dir);
+  const notes = readJSON(path.join(dir, 'notes.json'), []);
+  const offTopic = readTableTalk(dir);
   return {
     ...meta,
     id,
     dir,
     recap: fs.existsSync(recapFile) ? fs.readFileSync(recapFile, 'utf8') : null,
-    transcript: formatTranscript(readLines(path.join(dir, 'transcript.jsonl')), readJSON(path.join(dir, 'notes.json'), [])),
+    transcript: formatTranscript(lines, notes, offTopic),
+    entries: transcriptEntries(lines, notes, offTopic),
+    tableTalkLines: offTopic.size,
   };
 }
