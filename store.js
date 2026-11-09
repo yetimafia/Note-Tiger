@@ -66,9 +66,17 @@ export function readLines(file) {
   return fs.readFileSync(file, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l));
 }
 
+// Spelling fixes (spelling.js registers itself here, so every reader gets fixed text).
+let textFixer = null;
+export function setTextFixer(fn) { textFixer = fn; }
+
 // Transcript lines in the order they were spoken (they're written as transcription finishes).
-export function sessionLines(dir) {
-  return readLines(path.join(dir, 'transcript.jsonl')).sort((a, b) => a.t - b.t);
+export function sessionLines(dir, { raw = false } = {}) {
+  const lines = readLines(path.join(dir, 'transcript.jsonl')).sort((a, b) => a.t - b.t);
+  if (raw || !textFixer) return lines;
+  const gid = path.basename(path.dirname(path.dirname(dir)));
+  for (const l of lines) { try { l.text = textFixer(l.text, gid); } catch {} }
+  return lines;
 }
 
 export const lineKey = (l) => `${l.t}:${l.speaker}`;
@@ -158,6 +166,7 @@ export function readSession(gid, id) {
     recapLines: entries.filter((e) => e.recap).length,
     playStartedAt: meta.playStartedAt ?? null,
     stats: sessionStats(dir),
+    colors,
   };
 }
 
@@ -234,6 +243,8 @@ export function sessionStats(dir) {
   const end = Math.max(lines.at(-1).t + 5000, near(Date.parse(meta.endedAt), lines.at(-1).t + 5000));
   const ms = { game: 0, squirrel: 0, recap: 0, quiet: lines[0].t - start };
   const squirrels = {};
+  const spot = {};
+  let gmTalk = 0;
   for (let i = 0; i < lines.length; i++) {
     const l = lines[i];
     const gap = (lines[i + 1]?.t ?? end) - l.t;
@@ -242,7 +253,20 @@ export function sessionStats(dir) {
     ms[kind] += counted;
     ms.quiet += gap - counted;
     if (kind === 'squirrel') squirrels[baseName(l.speaker)] = (squirrels[baseName(l.speaker)] || 0) + counted;
+    // Spotlight: how long each player talked during the game (their own speaking time, not the gaps).
+    if (kind === 'game') {
+      const talk = Math.min(Number.isFinite(l.d) ? l.d * 1000 : counted, counted || 1000, 60_000);
+      if (l.gm) gmTalk += talk;
+      else {
+        const who = baseName(l.speaker);
+        const p = spot[who] || (spot[who] = { name: who, runner: String(l.speaker).match(/\(([^)]+)\)\s*$/)?.[1] || null, ms: 0, lines: 0 });
+        p.ms += talk; p.lines++;
+      }
+    }
   }
+  const playerTalk = Object.values(spot).reduce((a, p) => a + p.ms, 0) || 1;
+  const spotlight = Object.values(spot).sort((a, b) => b.ms - a.ms)
+    .map((p) => ({ ...p, ms: Math.round(p.ms), pct: Math.round((p.ms / playerTalk) * 100) }));
   const total = Object.values(ms).reduce((a, b) => a + b, 0) || 1;
   const pct = (v) => Math.round((v / total) * 100);
   const top = Object.entries(squirrels).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([name, t]) => ({ name, ms: t }));
@@ -251,6 +275,7 @@ export function sessionStats(dir) {
     gameMs: ms.game, squirrelMs: ms.squirrel, recapMs: ms.recap, quietMs: ms.quiet,
     gamePct: pct(ms.game), squirrelPct: pct(ms.squirrel), recapPct: pct(ms.recap), quietPct: pct(ms.quiet),
     topSquirrels: top,
+    spotlight, gmTalkMs: Math.round(gmTalk), playerTalkMs: Math.round(playerTalk),
   };
 }
 
@@ -271,7 +296,10 @@ export function statsText(stats) {
   ].filter(Boolean);
   const top = stats.topSquirrels[0] && stats.topSquirrels[0].ms >= 60_000
     ? `\nBiggest squirrel: **${stats.topSquirrels[0].name}** (${formatDuration(stats.topSquirrels[0].ms)})` : '';
-  return `**🐿️ Squirrel-o-meter** · ${formatDuration(stats.totalMs)} session\n${rows.join('\n')}${top}`;
+  const sp = (stats.spotlight || []).filter((p) => p.pct >= 1);
+  const spot = sp.length >= 2
+    ? `\n**🔦 Spotlight** (who talked in the game): ${sp.map((p) => `${p.runner || p.name} ${p.pct}%`).join(' · ')}` : '';
+  return `**🐿️ Squirrel-o-meter** · ${formatDuration(stats.totalMs)} session\n${rows.join('\n')}${top}${spot}`;
 }
 
 // The recap of the session before this one (for context), if there is one.

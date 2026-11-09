@@ -8,6 +8,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { CAMPAIGN_NAME, USE_CLAUDE } from './config.js';
 import { listSessions, readJSON, writeJSON, guildDir, gidOf, getSettings, sessionLines, baseName } from './store.js';
+import { setCampaignNames, knownNames } from './spelling.js';
 
 const editsFile = (gid) => path.join(guildDir(gid), 'campaign-edits.json');
 export const readEdits = (gid) => readJSON(editsFile(gid), []);
@@ -38,6 +39,8 @@ export function buildCampaign(gid, { upTo = null } = {}) {
   events.sort((a, b) => a.t - b.t);
 
   const npcs = new Map();      // key -> contact
+  const places = new Map();    // key -> place
+  const removedPlaces = new Set();
   const threads = new Map();   // id -> thread
   const removedNpcs = new Set();
   const removedThreads = new Set();
@@ -56,6 +59,16 @@ export function buildCampaign(gid, { upTo = null } = {}) {
         c.last = at;
         if (n.happened) c.history.push({ ...at, text: n.happened });
         npcs.set(key, c);
+      }
+      for (const p of ev.found.places || []) {
+        const key = npcKey(p.name);
+        if (!key || removedPlaces.has(key)) continue;
+        const c = places.get(key) || { key, name: p.name, what: '', first: at, history: [] };
+        if (nameScore(p.name) > nameScore(c.name)) c.name = p.name;
+        if (p.what) c.what = p.what;
+        c.last = at;
+        if (p.happened) c.history.push({ ...at, text: p.happened });
+        places.set(key, c);
       }
       for (const th of ev.found.threads || []) {
         if (removedThreads.has(th.id)) continue;
@@ -77,6 +90,12 @@ export function buildCampaign(gid, { upTo = null } = {}) {
       else if (e.type === 'npc-edit' && npcs.has(e.key)) {
         const c = npcs.get(e.key);
         for (const f of ['who', 'attitude']) if (typeof e[f] === 'string') c[f] = e[f];
+      } else if (e.type === 'place-delete') { places.delete(e.key); removedPlaces.add(e.key); }
+      else if (e.type === 'place-edit' && places.has(e.key)) { if (typeof e.what === 'string') places.get(e.key).what = e.what; }
+      else if (e.type === 'place-add') {
+        const key = npcKey(e.name);
+        removedPlaces.delete(key);
+        if (!places.has(key)) places.set(key, { key, name: e.name, what: e.what || '', first: at, last: at, history: [] });
       } else if (e.type === 'npc-add') {
         const key = npcKey(e.name);
         removedNpcs.delete(key);
@@ -89,8 +108,11 @@ export function buildCampaign(gid, { upTo = null } = {}) {
   const open = all.filter((t) => t.status === 'open');
   const closed = all.filter((t) => t.status === 'closed').reverse();
   open.forEach((t, i) => { t.n = i + 1; });   // the numbers people use in /campaign close
-  return { contacts, open, closed };
+  return { contacts, places: [...places.values()].sort((a, b) => a.name.localeCompare(b.name)), open, closed };
 }
+
+// Contact and place names feed the spelling fixer.
+setCampaignNames((gid) => { const c = buildCampaign(gid); return [...c.contacts, ...c.places].map((x) => x.name); });
 
 export function addEdit(gid, edit) {
   const edits = readEdits(gid);
@@ -106,6 +128,7 @@ const CAMPAIGN_SYSTEM = `You keep the campaign notebook for ${CAMPAIGN_NAME}, a 
 You get the recap of ONE session, the contacts/NPCs the team already knows, and the loose ends that are still open.
 Reply with JSON only, exactly this shape:
 {"npcs":[{"name":"...","who":"...","attitude":"...","happened":"..."}],
+ "places":[{"name":"...","what":"...","happened":"..."}],
  "newLooseEnds":["..."],
  "resolved":[{"id":"T3","how":"..."}]}
 
@@ -114,6 +137,10 @@ team dealt with directly). Not the player characters. If someone is already know
   who: a few words, who/what they are ("fixer in Redmond", "Mr. Johnson for Ares"). Empty if nothing new.
   attitude: how they feel about the team now, a few words ("friendly", "owes us", "wants us dead"). Empty if unknown.
   happened: one short sentence on what happened with them THIS session.
+places: every NAMED location that mattered this session (bars, safehouses, corp facilities, neighborhoods, clubs).
+  If it's already known, use the known name exactly.
+  what: a few words on what kind of place it is ("ork-run bar in Redmond"). Empty if nothing new.
+  happened: one short sentence on what happened there THIS session.
 newLooseEnds: new open questions, leads, debts, promises and threats from THIS session that the team may follow up
   on. One short sentence each. Don't repeat ones already in the open list.
 resolved: open loose ends (by their id) that this session clearly settled, with a few words on how.
@@ -142,10 +169,11 @@ export async function updateCampaign(dir, recap, askAI) {
   const gid = gidOf(dir);
   const before = buildCampaign(gid, { upTo: dir });
   const known = before.contacts.map((c) => `- ${c.name}${c.who ? `: ${c.who}` : ''}`).join('\n') || '(none yet)';
+  const knownPlaces = before.places.map((c) => `- ${c.name}${c.what ? `: ${c.what}` : ''}`).join('\n') || '(none yet)';
   const ids = new Map(before.open.map((t) => [`T${t.n}`, t.id]));
   const open = before.open.map((t) => `[T${t.n}] ${t.text}`).join('\n') || '(none)';
   const budget = USE_CLAUDE ? 60_000 : 9_000;
-  const user = `KNOWN CONTACTS:\n${known.slice(0, budget / 3)}\n\nOPEN LOOSE ENDS:\n${open.slice(0, budget / 3)}\n\n` +
+  const user = `KNOWN CONTACTS:\n${known.slice(0, budget / 4)}\n\nKNOWN PLACES:\n${knownPlaces.slice(0, budget / 5)}\n\nOPEN LOOSE ENDS:\n${open.slice(0, budget / 3)}\n\n` +
     `THIS SESSION'S RECAP:\n${String(recap).slice(0, budget)}`;
   const raw = await askAI(CAMPAIGN_SYSTEM, user, 2500, { json: true });
   const data = parseJSON(raw);
@@ -158,6 +186,9 @@ export async function updateCampaign(dir, recap, askAI) {
     npcs: (Array.isArray(data.npcs) ? data.npcs : [])
       .map((n) => ({ name: clean(n?.name, 60), who: clean(n?.who, 120), attitude: clean(n?.attitude, 60), happened: clean(n?.happened, 300) }))
       .filter((n) => n.name && !players.has(npcKey(n.name))),
+    places: (Array.isArray(data.places) ? data.places : [])
+      .map((p) => ({ name: clean(p?.name, 60), what: clean(p?.what, 120), happened: clean(p?.happened, 300) }))
+      .filter((p) => p.name && !players.has(npcKey(p.name))),
     threads: (Array.isArray(data.newLooseEnds) ? data.newLooseEnds : [])
       .map((t) => clean(typeof t === 'string' ? t : t?.text, 250)).filter(Boolean).slice(0, 15)
       .map((text, i) => ({ id: `${sid}#${i + 1}`, text })),
@@ -168,8 +199,17 @@ export async function updateCampaign(dir, recap, askAI) {
   // Same person listed twice by the AI: keep one.
   const seen = new Set();
   found.npcs = found.npcs.filter((n) => { const k = npcKey(n.name); if (seen.has(k)) return false; seen.add(k); return true; });
+  // Drop new loose ends that are just repeats of ones already open.
+  const norm = (t) => String(t).toLowerCase().replace(/[^a-z0-9 ]+/g, '').replace(/\s+/g, ' ').trim();
+  const openTexts = before.open.map((t) => norm(t.text));
+  const words = (t) => new Set(norm(t).split(' ').filter((w) => w.length > 2));
+  const overlap = (a, b) => { const A = words(a), B = words(b); if (!A.size || !B.size) return 0; let n = 0; for (const w of A) if (B.has(w)) n++; return n / Math.min(A.size, B.size); };
+  found.threads = found.threads.filter((t) => !openTexts.some((o) => o === norm(t.text) || overlap(o, t.text) >= 0.8))
+    .map((t, i) => ({ ...t, id: `${sid}#${i + 1}` }));
+  const seenP = new Set();
+  found.places = found.places.filter((n) => { const k = npcKey(n.name); if (seenP.has(k)) return false; seenP.add(k); return true; });
   writeJSON(sessionFile(dir), found);
-  console.log(`[campaign] ${found.npcs.length} contacts, ${found.threads.length} new loose ends, ${found.resolved.length} tied up`);
+  console.log(`[campaign] ${found.npcs.length} contacts, ${found.places.length} places, ${found.threads.length} new loose ends, ${found.resolved.length} tied up`);
   return found;
 }
 
@@ -182,12 +222,15 @@ export function campaignSummary(dir) {
   const fresh = found.npcs.filter((n) => !before.has(npcKey(n.name))).map((n) => n.name);
   const now = buildCampaign(gid);
   const bits = [];
+  const beforeP = new Set(buildCampaign(gid, { upTo: dir }).places.map((c) => c.key));
+  const freshP = (found.places || []).filter((n) => !beforeP.has(npcKey(n.name))).map((n) => n.name);
   if (fresh.length) bits.push(`🕵️ New contacts: ${fresh.slice(0, 8).join(', ')}${fresh.length > 8 ? ` +${fresh.length - 8} more` : ''}`);
+  if (freshP.length) bits.push(`📍 New places: ${freshP.slice(0, 6).join(', ')}${freshP.length > 6 ? ` +${freshP.length - 6} more` : ''}`);
   const loose = [];
   if (found.threads.length) loose.push(`${found.threads.length} new`);
   if (found.resolved.length) loose.push(`${found.resolved.length} tied up`);
   bits.push(`🧵 Loose ends: ${now.open.length} open${loose.length ? ` (${loose.join(', ')} this session)` : ''}`);
-  return `${bits.join('\n')}\n*See them with \`/campaign contacts\` and \`/campaign threads\`.*`;
+  return `${bits.join('\n')}\n*More: \`/campaign contacts\`, \`/campaign places\`, \`/campaign threads\`, \`/campaign story\`*`;
 }
 
 // ---------- rules calls made during a session ----------
@@ -220,4 +263,66 @@ export function rulesSection(dir) {
     return `• *“${clean(c.question, 150)}”* (${c.by || 'someone'})\n  ${head}${sentence ? ` — ${sentence}` : ''}`;
   });
   return `**📖 Rules Calls**\n${items.join('\n')}`;
+}
+
+// ---------- the story so far ----------
+// Each session keeps the campaign story as it stood after that session (story.md), built from the previous
+// one plus this session's recap.
+const STORY_SYSTEM = `You keep the running story of ${CAMPAIGN_NAME}, a Shadowrun tabletop RPG campaign.
+You get THE STORY SO FAR (may be empty) and the recap of the newest session. Rewrite the story so far so it
+includes the new session. Keep it a readable narrative for someone who missed sessions: who the runners are,
+the big events in order, who they've crossed, and where things stand now. Aim for 300–700 words in short
+paragraphs, a little noir flavor but accurate. Compress older events more than recent ones. Never invent facts.
+Use plain paragraphs (no headings), and end with one short paragraph starting "Where things stand:".`;
+
+export function latestStory(gid, { before = null } = {}) {
+  const sessions = listSessions(gid);
+  let out = null;
+  for (const s of sessions) {
+    if (before && path.resolve(s.dir) === path.resolve(before)) break;
+    const f = path.join(s.dir, 'story.md');
+    if (fs.existsSync(f)) out = { text: fs.readFileSync(f, 'utf8'), title: s.title, date: s.date };
+  }
+  return out;
+}
+
+export async function updateStory(dir, recap, askAI) {
+  const gid = gidOf(dir);
+  const prev = latestStory(gid, { before: dir });
+  const meta = readJSON(path.join(dir, 'meta.json'), {});
+  const names = knownNames(gid);
+  const user = `${names ? `Correct spellings of names: ${names}\n\n` : ''}THE STORY SO FAR:\n${prev?.text || '(nothing yet: this is the first session)'}\n\n---\n` +
+    `NEWEST SESSION: ${meta.title} (${meta.date})\n${String(recap).slice(0, USE_CLAUDE ? 60_000 : 9_000)}`;
+  const text = (await askAI(STORY_SYSTEM, user, 1800)).trim();
+  if (text.length < 80) throw new Error('the story came back empty');
+  fs.writeFileSync(path.join(dir, 'story.md'), text);
+  console.log('[story] updated');
+  return text;
+}
+
+// ---------- quotes (the Best Lines from every recap) ----------
+export function quotesFromRecap(recap) {
+  const out = [];
+  let inBest = false;
+  for (const raw of String(recap || '').split('\n')) {
+    const line = raw.trim();
+    if (/best lines/i.test(line) && (/^\*\*|^#/.test(line))) { inBest = true; continue; }
+    if (!inBest) continue;
+    if (/^(#|\*\*[^*]+\*\*\s*$)/.test(line)) break;     // next section
+    if (!line) continue;
+    const body = line.replace(/^[-*•]\s*/, '').replace(/^\d+[.)]\s*/, '');
+    const m = body.match(/^[*_]*["“](.+?)["”][*_]*\s*[—–-]+\s*(.+)$/);
+    if (!m) continue;
+    const tableTalk = /\(table talk\)/i.test(m[2]);
+    out.push({ quote: m[1].trim(), by: m[2].replace(/\(table talk\)/i, '').replace(/[*_]/g, '').trim(), tableTalk });
+  }
+  return out;
+}
+
+export function allQuotes(gid) {
+  return listSessions(gid).flatMap((s) => {
+    const f = path.join(s.dir, 'recap.md');
+    if (!fs.existsSync(f)) return [];
+    return quotesFromRecap(fs.readFileSync(f, 'utf8')).map((q) => ({ ...q, title: s.title, date: s.date }));
+  });
 }

@@ -14,7 +14,7 @@ import {
   knownGuilds, listSessions, readJSON, writeJSON, sessionLines, readLabels, transcriptEntries, speakerColors,
   baseName, sessionStats, gidOf,
 } from './store.js';
-import { buildCampaign } from './campaign.js';
+import { buildCampaign, latestStory, allQuotes } from './campaign.js';
 
 const ITERATIONS = 600_000;
 const STATE_FILE = path.join(DATA_DIR, 'site.json');   // salt, password check, file names (stays on this PC)
@@ -79,7 +79,7 @@ function allSessionDirs() {
     .filter((d) => fs.existsSync(path.join(d, 'transcript.jsonl')) && readJSON(path.join(d, 'meta.json'), {}).endedAt);
 }
 
-function manifestFor(st, dirs) {
+export function manifestFor(st, dirs) {
   const sessions = dirs.map((dir) => {
     const meta = readJSON(path.join(dir, 'meta.json'), {});
     const id = st.files[dir];
@@ -96,10 +96,13 @@ function manifestFor(st, dirs) {
     return {
       server: knownGuilds().find((g) => g.id === gid)?.name || '',
       contacts: c.contacts.map((n) => ({ name: n.name, who: n.who, attitude: n.attitude, first: at(n.first), history: n.history.map((h) => ({ date: h.date, title: h.title, text: h.text })) })),
+      places: c.places.map((n) => ({ name: n.name, what: n.what, first: at(n.first), history: n.history.map((h) => ({ date: h.date, title: h.title, text: h.text })) })),
+      story: latestStory(gid),
+      quotes: allQuotes(gid),
       open: c.open.map((t) => ({ n: t.n, text: t.text, opened: at(t.opened) })),
       closed: c.closed.map((t) => ({ text: t.text, how: t.how, opened: at(t.opened), closed: at(t.closed) })),
     };
-  }).filter((t) => t.contacts.length || t.open.length || t.closed.length);
+  }).filter((t) => t.contacts.length || t.places.length || t.open.length || t.closed.length || t.story || t.quotes.length);
   return { campaign: CAMPAIGN_NAME, updated: new Date().toISOString(), sessions, trackers };
 }
 

@@ -27,6 +27,9 @@ export const SETTINGS = [
   { key: 'SITE_PASSWORD', secret: true },
   { key: 'SITE_SHARE_PASSWORD' },
   { key: 'LIB_PAGE_IMAGES' },
+  { key: 'BACKUP_ENABLED' },
+  { key: 'BACKUP_REPO' },
+  { key: 'BACKUP_TOKEN', secret: true },
 ];
 
 function readEnvLines() {
@@ -206,6 +209,14 @@ export function startWeb(ctx, port) {
           return res.end(asText ? s.transcript : ctx.transcriptHtml(guild, id));
         }
       }
+
+      // Backups
+      if (parts[1] === 'backup' && parts[2] === 'now' && req.method === 'POST') return send(res, 200, await ctx.backupNow());
+      if (parts[1] === 'backup' && parts[2] === 'restore' && req.method === 'POST') return send(res, 200, await ctx.restoreBackup());
+      // Spelling: GET/POST /api/vocab, POST /api/vocab/test {text}
+      if (parts[1] === 'vocab' && !parts[2] && req.method === 'GET') return send(res, 200, ctx.vocab());
+      if (parts[1] === 'vocab' && !parts[2] && req.method === 'POST') return send(res, 200, ctx.saveVocab(await readBody(req)));
+      if (parts[1] === 'vocab' && parts[2] === 'test' && req.method === 'POST') return send(res, 200, { text: ctx.testSpelling((await readBody(req)).text || '') });
 
       // GET /api/campaign/:guild   POST /api/campaign/:guild {type, ...}
       if (parts[1] === 'campaign' && parts[2]) {

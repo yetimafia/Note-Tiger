@@ -7,7 +7,9 @@ import {
   APP_DIR, DISCORD_TOKEN, PANEL_PORT, AUTO_START, USE_CLAUDE, OLLAMA_MODEL, CAMPAIGN_NAME, WHISPER_MODEL,
 } from './config.js';
 import { listSessions, readSession, sessionDir, knownGuilds, transcriptHtml } from './store.js';
-import { buildCampaign, addEdit } from './campaign.js';
+import { buildCampaign, addEdit, latestStory, allQuotes } from './campaign.js';
+import { backupNow, restoreBackup, backupStatus, backupConfigured, startBackupSchedule } from './backup.js';
+import { readVocab, saveVocab, fixText } from './spelling.js';
 import { recapSession, askArchive, ollamaStatus, refreshOllama, AI_LABEL, getProgress } from './ai.js';
 import { startWeb } from './web.js';
 import { publishSite, siteStatus, siteConfigured } from './site.js';
@@ -57,6 +59,11 @@ function startBot() {
       return;
     }
     if (msg?.type !== 'status') return;
+    // A session just ended: back up once its recap has had time to finish.
+    const wasRec = (botStatus?.guilds || []).some((g) => g.recording);
+    if (wasRec && !(msg.guilds || []).some((g) => g.recording) && backupConfigured()) {
+      setTimeout(() => backupNow('after a session').catch(() => {}), 20 * 60_000);
+    }
     botStatus = msg;
     if (botState === 'starting' && msg.online) botState = 'running';
   });
@@ -139,6 +146,7 @@ startWeb({
         : null,
       guilds: guildList(),
       site: siteStatus(),
+      backup: backupStatus(),
       progress: this.progress(),
     };
   },
@@ -185,20 +193,32 @@ startWeb({
     if (liveSessionId(gid) === id) throw new Error('That session is still recording.');
     return askBot({ type: 'repost', gid, sessionId: id });
   },
-  campaign(gid) { return buildCampaign(safeGid(gid)); },
+  campaign(gid) {
+    const c = buildCampaign(safeGid(gid));
+    return { ...c, story: latestStory(gid), quotes: allQuotes(gid) };
+  },
+  backupNow() { return backupNow('manual'); },
+  async restoreBackup() {
+    if ((botStatus?.guilds || []).some((g) => g.recording)) throw new Error('Stop the recording before restoring.');
+    return restoreBackup();
+  },
+  vocab() { return readVocab(); },
+  saveVocab(v) { return saveVocab(v); },
+  testSpelling(text) { return fixText(String(text).slice(0, 2000), knownGuilds()[0]?.id || null); },
   campaignEdit(gid, edit) {
     const allowed = {
       'thread-add': ['text'], 'thread-close': ['id', 'how'], 'thread-reopen': ['id'], 'thread-delete': ['id'],
       'thread-edit': ['id', 'text'], 'npc-add': ['name', 'who', 'attitude'], 'npc-edit': ['key', 'who', 'attitude'], 'npc-delete': ['key'],
+      'place-add': ['name', 'what'], 'place-edit': ['key', 'what'], 'place-delete': ['key'],
     }[edit?.type];
     if (!allowed) throw new Error('Unknown change.');
     const clean = { type: edit.type, by: 'Note Tiger' };
     for (const f of allowed) if (edit[f] !== undefined) clean[f] = String(edit[f]).replace(/\s+/g, ' ').trim().slice(0, 300);
     if ((clean.type === 'thread-add' || clean.type === 'thread-edit') && !clean.text) throw new Error('Type the loose end first.');
-    if (clean.type === 'npc-add' && !clean.name) throw new Error('Type a name first.');
+    if ((clean.type === 'npc-add' || clean.type === 'place-add') && !clean.name) throw new Error('Type a name first.');
     addEdit(safeGid(gid), clean);
     refreshSiteSoon();
-    return buildCampaign(safeGid(gid));
+    return this.campaign(gid);
   },
   library() { return { books: listBooks(), progress: libraryProgress(), folder: LIB_DIR }; },
   addBook(name, buffer) { return addBook(name, buffer); },
@@ -254,6 +274,8 @@ if (DISCORD_TOKEN && AUTO_START) {
 } else if (!DISCORD_TOKEN) {
   console.log('No Discord token yet. Open Settings in Note Tiger to finish setup.');
 }
+
+startBackupSchedule();
 
 // Rulebooks: index anything new now, and whenever PDFs are added to or removed from the library folder.
 syncLibrary().catch((e) => console.error('[library]', e.message));

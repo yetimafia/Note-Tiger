@@ -8,9 +8,10 @@ import {
 } from './config.js';
 import {
   listSessions, readJSON, formatTranscript, sessionLines, readLabels, updateLabels, lineKey, writeTranscriptFiles,
-  previousRecap,
+  previousRecap, gidOf,
 } from './store.js';
-import { updateCampaign, rulesSection } from './campaign.js';
+import { updateCampaign, updateStory, rulesSection } from './campaign.js';
+import { knownNames } from './spelling.js';
 
 // ---------- progress (shown as a progress bar in Note Tiger) ----------
 // Key: "<server id>/<session id>". Stages: tagging 0–70%, opening recap 70–75%, notes and recap 75–99%, contacts 99–100%.
@@ -281,7 +282,9 @@ the Best Lines section. Mark any quote you take from it with "(table talk)".`;
 async function writeRecap(title, date, gameText, tableText, prevRecap, dir = null) {
   const step = (frac, label) => dir && setProgress(dir, 75, 99, frac, label);
   const prevPart = prevRecap ? `For context, here is the PREVIOUS session's recap:\n${prevRecap}\n\n---\n\n` : '';
-  const head = `${prevPart}Session title: ${title} (${date})\n\n`;
+  const names = dir ? knownNames(gidOf(dir)) : '';
+  const namesPart = names ? `Correct spellings of names in this campaign (the transcript may mangle them): ${names}\n\n` : '';
+  const head = `${prevPart}${namesPart}Session title: ${title} (${date})\n\n`;
   const tablePart = tableText ? `\n\n---\n${TABLE_TALK_NOTE}\n${tableTalkCandidates(tableText, USE_CLAUDE ? 60_000 : 6_000)}` : '';
   const chunks = chunkText(gameText || '(no in-game talk was transcribed)', RECAP_CHUNK_CHARS);
   if (chunks.length === 1) {
@@ -333,6 +336,12 @@ async function recapSessionInner(dir, { prevRecap = previousRecap(dir), reclassi
     await updateCampaign(dir, text, askAI);
   } catch (err) {
     console.error('[campaign] skipped:', err.message);
+  }
+  try {
+    setProgress(dir, 99, 100, 0.5, 'Updating the story so far');
+    await updateStory(dir, text, askAI);
+  } catch (err) {
+    console.error('[story] skipped:', err.message);
   }
   // Rules looked up with /game ask during the session.
   const rules = rulesSection(dir);

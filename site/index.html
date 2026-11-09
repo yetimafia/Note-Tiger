@@ -93,11 +93,20 @@
   .npc ul { margin: 8px 0 0; padding-left: 20px; font-size: 14px; }
   .npc li { margin: 3px 0; }
   .npc .met { color: var(--dim); font-size: 12px; margin-top: 6px; }
+  .qt { background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--accent); border-radius: 10px; padding: 12px 16px; margin: 8px 0; }
+  .qt .qx { color: var(--bright); font-size: 16px; }
+  .qt .qb { color: var(--dim); font-size: 13px; margin-top: 4px; }
   .thr { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px; margin: 6px 0; display: flex; gap: 10px; }
   .thr .k { color: var(--accent); font-weight: 800; min-width: 24px; }
   .thr .from { color: var(--dim); font-size: 12px; }
   .thr.done { opacity: .7; }
   .thr.done .tx { text-decoration: line-through; color: var(--dim); }
+  .spot { margin-top: 12px; border-top: 1px solid var(--line); padding-top: 10px; }
+  .sp { display: grid; grid-template-columns: minmax(80px, 180px) minmax(0, 1fr) 40px; gap: 10px; align-items: center; margin-top: 6px; font-size: 14px; }
+  .sp .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .sp .trk { height: 9px; background: var(--bg); border-radius: 99px; overflow: hidden; }
+  .sp .trk span { display: block; height: 100%; }
+  .sp b { text-align: right; color: var(--bright); }
   .empty { color: var(--dim); text-align: center; padding: 50px 10px; }
   .spin { width: 26px; height: 26px; border: 3px solid var(--line); border-top-color: var(--accent); border-radius: 50%; animation: r 1s linear infinite; margin: 60px auto; }
   @keyframes r { to { transform: rotate(360deg); } }
@@ -186,9 +195,12 @@ function meterBar(st) {
 function nav(on) {
   const t = manifest.trackers || [];
   const nC = t.reduce((a, x) => a + x.contacts.length, 0), nO = t.reduce((a, x) => a + x.open.length, 0);
-  return `<div class="nav"><a href="#" class="${on === 'list' ? 'on' : ''}">📼 Sessions</a>
-    <a href="#contacts" class="${on === 'contacts' ? 'on' : ''}">🕵️ Contacts${nC ? ` (${nC})` : ''}</a>
-    <a href="#threads" class="${on === 'threads' ? 'on' : ''}">🧵 Loose ends${nO ? ` (${nO})` : ''}</a></div>`;
+  const nP = t.reduce((a, x) => a + (x.places || []).length, 0), nQ = t.reduce((a, x) => a + (x.quotes || []).length, 0);
+  const hasStory = t.some((x) => x.story);
+  const link = (id, label) => `<a href="#${id}" class="${on === (id || 'list') ? 'on' : ''}">${label}</a>`;
+  return `<div class="nav">${link('', '📼 Sessions')}${hasStory ? link('story', '📖 Story so far') : ''}
+    ${link('contacts', `🕵️ Contacts${nC ? ` (${nC})` : ''}`)}${nP ? link('places', `📍 Places (${nP})`) : ''}
+    ${link('threads', `🧵 Loose ends${nO ? ` (${nO})` : ''}`)}${nQ ? link('quotes', `💬 Quotes (${nQ})`) : ''}</div>`;
 }
 
 function showContacts() {
@@ -211,6 +223,58 @@ function showContacts() {
     $('#clist').innerHTML = html || `<div class="empty">${q ? 'Nobody matches that.' : 'No contacts yet.'}</div>`;
   };
   $('#cq').oninput = draw;
+  draw();
+}
+
+function showStory() {
+  const t = (manifest.trackers || []).filter((x) => x.story);
+  const many = t.length > 1;
+  app.innerHTML = header() + `<div class="wrap">${nav('story')}<h2 class="page">The story so far</h2>
+    ${t.length ? t.map((tr) => `${many ? `<div class="server">${esc(tr.server)}</div>` : ''}
+      <p class="sub">Through <b>${esc(tr.story.title)}</b> (${esc(niceDate(tr.story.date))}). Updated after every session.</p>
+      <div class="recap">${tr.story.text.split(/\n\s*\n/).map((p) => `<p>${esc(p)}</p>`).join('')}</div>`).join('')
+    : '<div class="empty">No story yet.</div>'}
+    <footer>Note Tiger · encrypted archive</footer></div>`;
+}
+
+function showPlaces() {
+  const t = (manifest.trackers || []);
+  const many = t.length > 1;
+  app.innerHTML = header() + `<div class="wrap">${nav('places')}<h2 class="page">Places</h2>
+    <p class="sub">Everywhere the team has been, picked up from the recaps. Tap one for what happened there.</p>
+    <div class="tools"><input type="search" id="pq" placeholder="Search places…"></div><div id="plist"></div>
+    <footer>Note Tiger · encrypted archive</footer></div>`;
+  const draw = () => {
+    const q = $('#pq').value.trim().toLowerCase();
+    const html = t.map((tr) => {
+      const list = (tr.places || []).filter((c) => !q || `${c.name} ${c.what} ${c.history.map((h) => h.text).join(' ')}`.toLowerCase().includes(q));
+      if (!list.length) return '';
+      return (many ? `<div class="server">${esc(tr.server)}</div>` : '') + list.map((c) => `<details class="npc"${q ? ' open' : ''}>
+        <summary><span class="nm">📍 ${esc(c.name)}</span>${c.what ? `<span class="who">${esc(c.what)}</span>` : ''}</summary>
+        ${c.history.length ? `<ul>${c.history.map((h) => `<li><span class="tm">${esc(h.date)}</span>${esc(h.text)}</li>`).join('')}</ul>` : ''}
+        <div class="met">First visited: ${esc(c.first?.title || '?')}${c.first?.date ? ` (${esc(niceDate(c.first.date))})` : ''}</div></details>`).join('');
+    }).join('');
+    $('#plist').innerHTML = html || `<div class="empty">${q ? 'No places match that.' : 'No places yet.'}</div>`;
+  };
+  $('#pq').oninput = draw;
+  draw();
+}
+
+function showQuotes() {
+  const t = (manifest.trackers || []);
+  app.innerHTML = header() + `<div class="wrap">${nav('quotes')}<h2 class="page">Quotes</h2>
+    <p class="sub">The Best Lines from every session.</p>
+    <div class="tools"><input type="search" id="qq" placeholder="Search quotes or names…"><button class="ghost" id="qr">🎲 Random</button></div><div id="qlist"></div>
+    <footer>Note Tiger · encrypted archive</footer></div>`;
+  const all = t.flatMap((tr) => tr.quotes || []).reverse();
+  const card = (x) => `<div class="qt"><div class="qx">“${esc(x.quote)}”</div><div class="qb">— <b>${esc(x.by)}</b>${x.tableTalk ? ' <span class="tag">table talk</span>' : ''} · ${esc(x.title)}, ${esc(niceDate(x.date))}</div></div>`;
+  const draw = () => {
+    const q = $('#qq').value.trim().toLowerCase();
+    const list = all.filter((x) => !q || `${x.quote} ${x.by}`.toLowerCase().includes(q));
+    $('#qlist').innerHTML = list.length ? list.map(card).join('') : `<div class="empty">${q ? 'No quotes match that.' : 'No quotes yet.'}</div>`;
+  };
+  $('#qq').oninput = draw;
+  $('#qr').onclick = () => { if (all.length) { $('#qq').value = ''; $('#qlist').innerHTML = card(all[Math.floor(Math.random() * all.length)]); } };
   draw();
 }
 
@@ -237,6 +301,15 @@ function showList() {
       <div class="dots">${(s.people || []).map((p) => `<span><i style="background:${p.color}"></i>${esc(p.name)}</span>`).join('')}</div></div>`).join('')}</div>`
     : '<div class="empty">No sessions published yet.</div>'}
     <footer>Note Tiger · encrypted archive</footer></div>`;
+}
+
+// Each player's share of the talking during the game (GM not counted), in their transcript color.
+function spotlight(st, s) {
+  const sp = (st.spotlight || []).filter((p) => p.pct >= 1);
+  if (sp.length < 2) return '';
+  const color = (name) => s.entries.find((e) => e.c && e.s.replace(/\s*\([^)]*\)\s*$/, '') === name)?.c || 'var(--accent2)';
+  return `<div class="spot"><b>🔦 Spotlight</b> <span class="sub">· who talked during the game (GM not counted)</span>
+    ${sp.map((p) => `<div class="sp"><span class="nm">${esc(p.runner || p.name)}</span><span class="trk"><span style="width:${Math.max(2, p.pct)}%;background:${color(p.name)}"></span></span><b>${p.pct}%</b></div>`).join('')}</div>`;
 }
 
 function md(text) {
@@ -273,7 +346,8 @@ async function showSession(id) {
     ${st ? `<div class="meter"><b>🐿️ Squirrel-o-meter</b> <span class="sub">· ${fmtDur(st.totalMs)} session</span><div class="bar">${meterBar(st)}</div>
       <div class="legend">${[['#7bd88f', 'Playing the game', st.gameMs, st.gamePct], ['#f5a524', 'Squirrels', st.squirrelMs, st.squirrelPct], ['#9be7ef', 'Recap of last session', st.recapMs, st.recapPct], ['#5c6370', 'Quiet / breaks', st.quietMs, st.quietPct]]
         .filter((p) => p[3] > 0).map(([c, l, ms, p]) => `<span><i style="background:${c}"></i>${l} <b>${fmtDur(ms)}</b> (${p}%)</span>`).join('')}</div>
-      ${st.topSquirrels?.length ? `<div class="sub" style="margin:6px 0 0">Biggest squirrels: ${st.topSquirrels.filter((t) => t.ms >= 60000).map((t) => `${esc(t.name)} ${fmtDur(t.ms)}`).join(', ')}</div>` : ''}</div>` : ''}
+      ${st.topSquirrels?.length ? `<div class="sub" style="margin:6px 0 0">Biggest squirrels: ${st.topSquirrels.filter((t) => t.ms >= 60000).map((t) => `${esc(t.name)} ${fmtDur(t.ms)}`).join(', ')}</div>` : ''}
+      ${spotlight(st, s)}</div>` : ''}
     <div class="tabs"><button class="tab" data-t="recap">Recap</button><button class="tab" data-t="transcript">Transcript</button></div>
     <div id="body"></div></div>`;
   app.querySelectorAll('.tab').forEach((b) => b.onclick = () => { view.tab = b.dataset.t; render(); });
@@ -316,6 +390,9 @@ function route() {
   window.scrollTo(0, 0);
   if (id === 'contacts') return showContacts();
   if (id === 'threads') return showThreads();
+  if (id === 'story') return showStory();
+  if (id === 'places') return showPlaces();
+  if (id === 'quotes') return showQuotes();
   id ? showSession(id) : showList();
 }
 window.addEventListener('hashchange', route);

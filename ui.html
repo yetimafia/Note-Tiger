@@ -76,8 +76,11 @@
   .recap blockquote { border-left: 3px solid var(--accent); margin: 8px 0; padding: 2px 12px; color: var(--dim); }
   .recap ul { padding-left: 22px; }
   pre.transcript { white-space: pre-wrap; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 14px; max-height: 60vh; overflow: auto; font-size: 13px; }
-  .camp { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr); gap: 16px; }
+  .camp { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr); gap: 16px; align-items: start; }
   @media (max-width: 900px) { .camp { grid-template-columns: minmax(0,1fr); } }
+  .camp > div > .card { margin-bottom: 16px; }
+  .quote { border-left: 3px solid var(--accent); padding: 4px 12px; margin: 10px 0; }
+  .quote .by { color: var(--dim); font-size: 13px; }
   .npc { border-bottom: 1px solid var(--line); padding: 10px 0; }
   .npc:last-child { border-bottom: 0; }
   .npc summary { cursor: pointer; list-style: none; display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
@@ -92,6 +95,12 @@
   .thr.done .tx > span:first-child { text-decoration: line-through; color: var(--dim); }
   .mini { background: none; border: 1px solid var(--line); color: var(--dim); border-radius: 6px; padding: 2px 8px; font: inherit; font-size: 12px; cursor: pointer; white-space: nowrap; }
   .mini:hover { color: var(--text); border-color: var(--dim); }
+  .spot { margin-top: 12px; border-top: 1px solid var(--line); padding-top: 10px; }
+  .sp { display: grid; grid-template-columns: minmax(90px, 200px) minmax(0, 1fr) 42px; gap: 10px; align-items: center; margin-top: 6px; font-size: 14px; }
+  .sp .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .sp .trk { height: 9px; background: var(--bg); border-radius: 99px; overflow: hidden; }
+  .sp .trk span { display: block; height: 100%; border-radius: 99px; }
+  .sp b { text-align: right; }
   .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
   .answer { white-space: pre-wrap; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 14px; margin-top: 14px; }
   .empty { color: var(--dim); text-align: center; padding: 40px 10px; }
@@ -204,12 +213,23 @@
       <div><h1>🕵️ Campaign</h1><p class="sub">Contacts and loose ends, picked up from every recap. Fix anything the AI got wrong here.</p></div>
       <select id="campGuild" style="width:auto;min-width:200px"></select>
     </div>
+    <div class="card" id="campStoryCard">
+      <details id="campStoryBox"><summary style="cursor:pointer"><h2 style="display:inline;margin:0">📖 The story so far</h2> <span class="hint" id="campStoryWhen"></span></summary>
+        <div class="recap" id="campStory" style="margin-top:10px"></div></details>
+    </div>
     <div class="camp">
+      <div>
       <div class="card">
         <div class="row" style="justify-content:space-between"><h2 style="margin:0">Contacts &amp; NPCs <span class="hint" id="campNpcCount"></span></h2>
           <input type="text" id="campNpcQ" placeholder="Search…" style="width:180px"></div>
         <div id="campNpcs"><div class="empty">Loading…</div></div>
         <div class="row" style="margin-top:12px"><input type="text" id="campNpcName" placeholder="Add someone by hand: name" style="flex:1;min-width:140px"><input type="text" id="campNpcWho" placeholder="who they are" style="flex:1;min-width:140px"><button class="btn ghost" id="campNpcAdd">Add</button></div>
+      </div>
+      <div class="card">
+        <h2 style="margin-top:0">📍 Places <span class="hint" id="campPlaceCount"></span></h2>
+        <div id="campPlaces"><div class="empty">Loading…</div></div>
+        <div class="row" style="margin-top:12px"><input type="text" id="campPlaceName" placeholder="Add a place: name" style="flex:1;min-width:140px"><input type="text" id="campPlaceWhat" placeholder="what it is" style="flex:1;min-width:140px"><button class="btn ghost" id="campPlaceAdd">Add</button></div>
+      </div>
       </div>
       <div class="card">
         <h2 style="margin-top:0">🧵 Loose ends <span class="hint" id="campThrCount"></span></h2>
@@ -218,6 +238,11 @@
         <h2 style="margin-top:22px">✅ Tied up</h2>
         <div id="campClosed"></div>
       </div>
+    </div>
+    <div class="card">
+      <div class="row" style="justify-content:space-between"><h2 style="margin:0">💬 Quotes <span class="hint" id="campQuoteCount"></span></h2>
+        <input type="text" id="campQuoteQ" placeholder="Search quotes…" style="width:200px"></div>
+      <div id="campQuotes"></div>
     </div>
   </section>
 
@@ -346,6 +371,39 @@
         <div class="row" style="margin-top:12px">
           <button class="btn ghost" id="publishAllBtn" type="button">Publish all sessions now</button>
           <span class="hint" id="siteHint"></span>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>🔤 Spelling</h2>
+      <p class="hint" style="margin-top:0">Speech recognition mangles names ("wren rocky" for Renraku). Note Tiger fixes them in transcripts and recaps using Shadowrun names, your runners, contacts and places, plus anything you add here. Changes apply to old sessions too.</p>
+      <label class="switch"><input type="checkbox" id="vocAuto"> Fix words that <i>sound like</i> a known name</label>
+      <label for="vocWords">Words to know <span class="hint">(one per line: NPCs, places, gear, slang)</span></label>
+      <textarea id="vocWords" rows="5" placeholder="Twitch&#10;The Big Rhino&#10;Sticks"></textarea>
+      <label for="vocFixes">Always fix <span class="hint">(one per line: what it hears = what you meant)</span></label>
+      <textarea id="vocFixes" rows="4" placeholder="soy calf = soykaf&#10;new yen = nuyen"></textarea>
+      <label for="vocTest">Try it</label>
+      <div class="row"><input type="text" id="vocTest" placeholder="e.g. we hit the wren rocky lab and called the night errant" style="flex:1"><button class="btn ghost" id="vocTestBtn" type="button">Fix it</button></div>
+      <div class="answer" id="vocOut" hidden></div>
+      <div class="row" style="margin-top:12px"><button class="btn ghost" id="vocSave" type="button">Save spelling</button><span class="hint" id="vocHint">Saved right away, no restart needed.</span></div>
+    </div>
+
+    <div class="card">
+      <h2>💾 Backups</h2>
+      <p class="hint" style="margin-top:0">Copies your sessions, contacts, loose ends and settings to a <b>private</b> GitHub repository: the day after anything changes, after each session, and at least once a week. Your tokens and passwords are never included. On a new PC, set this up again and click <b>Restore</b>.</p>
+      <label class="switch"><input type="checkbox" id="BACKUP_ENABLED"> Back up automatically</label>
+      <div id="backupBox">
+        <label for="BACKUP_REPO">Private backup repository</label>
+        <input type="text" id="BACKUP_REPO" placeholder="yourname/note-tiger-backup">
+        <div class="hint">On GitHub: <a href="https://github.com/new" target="_blank" style="color:var(--accent2)">create a new repository</a>, name it e.g. <code>note-tiger-backup</code>, choose <b>Private</b>. Note Tiger refuses to back up to a public one.</div>
+        <label for="BACKUP_TOKEN">GitHub token <span class="hint">(optional)</span></label>
+        <input type="password" id="BACKUP_TOKEN" autocomplete="off">
+        <div class="hint">Leave empty to use the website token above. Either way, the token needs access to the backup repository: <a href="https://github.com/settings/personal-access-tokens" target="_blank" style="color:var(--accent2)">edit your token</a> → Repository access → add the backup repository; Permissions → <b>Contents: Read and write</b>.</div>
+        <div class="row" style="margin-top:12px">
+          <button class="btn ghost" id="backupNowBtn" type="button">Back up now</button>
+          <button class="btn ghost" id="restoreBtn" type="button">Restore from backup…</button>
+          <span class="hint" id="backupHint"></span>
         </div>
       </div>
     </div>
@@ -559,6 +617,21 @@ function renderCampaign() {
       <div class="row" style="gap:6px;margin-top:6px"><button class="mini" data-act="npc-edit">Edit</button><button class="mini" data-act="npc-delete">Remove</button></div>
     </details>`).join('')
     : `<div class="empty">${camp.contacts.length ? 'Nobody matches that search.' : 'No contacts yet. They\'re picked up when a recap is written (or rewritten).'}</div>`;
+  $('#campPlaceCount').textContent = `(${camp.places.length})`;
+  $('#campPlaces').innerHTML = camp.places.length ? camp.places.map((c) => `<details class="npc" data-pkey="${esc(c.key)}">
+      <summary><b>${esc(c.name)}</b>${c.what ? `<span class="hint" style="margin:0">${esc(c.what)}</span>` : ''}</summary>
+      <div class="hint">First visited: ${esc(c.first?.title || '?')} (${esc(c.first?.date || '?')})</div>
+      ${c.history.length ? `<ul>${c.history.map((h) => `<li><i>${esc(h.date)}:</i> ${esc(h.text)}</li>`).join('')}</ul>` : ''}
+      <div class="row" style="gap:6px;margin-top:6px"><button class="mini" data-act="place-edit">Edit</button><button class="mini" data-act="place-delete">Remove</button></div>
+    </details>`).join('') : '<div class="empty">No places yet.</div>';
+  const st = camp.story;
+  $('#campStoryWhen').textContent = st ? `· through ${st.title} (${st.date})` : '· written with the next recap';
+  $('#campStory').innerHTML = st ? st.text.split(/\n\s*\n/).map((p) => `<p>${esc(p)}</p>`).join('') : '<div class="hint">No story yet. It\'s written after each session\'s recap (or when you rewrite a recap).</div>';
+  const qq = $('#campQuoteQ').value.trim().toLowerCase();
+  const quotes = [...camp.quotes].reverse().filter((x) => !qq || `${x.quote} ${x.by}`.toLowerCase().includes(qq));
+  $('#campQuoteCount').textContent = `(${camp.quotes.length})`;
+  $('#campQuotes').innerHTML = quotes.length ? quotes.map((x) => `<div class="quote">“${esc(x.quote)}”<div class="by">— ${esc(x.by)}${x.tableTalk ? ' (table talk)' : ''} · ${esc(x.title)}, ${esc(x.date)}</div></div>`).join('')
+    : `<div class="hint">${camp.quotes.length ? 'No quotes match.' : 'No quotes yet. They come from the Best Lines in each recap.'}</div>`;
   $('#campThrCount').textContent = `(${camp.open.length} open)`;
   const thr = (t, done) => `<div class="thr ${done ? 'done' : ''}" data-id="${esc(t.id)}">
       <span class="n">${done ? '✓' : t.n + '.'}</span>
@@ -572,10 +645,22 @@ function renderCampaign() {
 }
 $('#campGuild').addEventListener('change', loadCampaign);
 $('#campNpcQ').addEventListener('input', () => camp && renderCampaign());
+$('#campQuoteQ').addEventListener('input', () => camp && renderCampaign());
+$('#campPlaceAdd').addEventListener('click', async () => {
+  const name = $('#campPlaceName').value.trim(); if (!name) return;
+  await campEdit({ type: 'place-add', name, what: $('#campPlaceWhat').value.trim() });
+  $('#campPlaceName').value = $('#campPlaceWhat').value = '';
+});
 $('#tab-campaign').addEventListener('click', (e) => {
   const b = e.target.closest('button.mini'); if (!b) return;
   e.preventDefault();
   const act = b.dataset.act;
+  if (act.startsWith('place')) {
+    const key = b.closest('.npc').dataset.pkey, c = camp.places.find((x) => x.key === key);
+    if (act === 'place-delete') { if (confirm(`Remove ${c.name} from the places?`)) campEdit({ type: act, key }); return; }
+    const what = prompt(`What is ${c.name}?`, c.what); if (what === null) return;
+    return campEdit({ type: act, key, what });
+  }
   if (act.startsWith('npc')) {
     const key = b.closest('.npc').dataset.key, c = camp.contacts.find((x) => x.key === key);
     if (act === 'npc-delete') { if (confirm(`Remove ${c.name} from the contacts?`)) campEdit({ type: act, key }); return; }
@@ -595,6 +680,63 @@ $('#campNpcAdd').addEventListener('click', async () => {
   const name = $('#campNpcName').value.trim(); if (!name) return;
   await campEdit({ type: 'npc-add', name, who: $('#campNpcWho').value.trim() });
   $('#campNpcName').value = $('#campNpcWho').value = '';
+});
+
+// ---------- spelling ----------
+async function loadVocab() {
+  try {
+    const v = await api('/api/vocab');
+    $('#vocAuto').checked = v.auto !== false;
+    $('#vocWords').value = v.words.join('\n');
+    $('#vocFixes').value = v.fixes.map((f) => `${f.heard} = ${f.meant}`).join('\n');
+  } catch {}
+}
+function vocabFromForm() {
+  return {
+    auto: $('#vocAuto').checked,
+    words: $('#vocWords').value.split('\n').map((x) => x.trim()).filter(Boolean),
+    fixes: $('#vocFixes').value.split('\n').map((x) => x.split(/\s*(?:=|→|->)\s*/)).filter((p) => p.length === 2 && p[0] && p[1]).map(([heard, meant]) => ({ heard, meant })),
+  };
+}
+$('#vocSave').addEventListener('click', async () => {
+  try { await api('/api/vocab', { method: 'POST', body: vocabFromForm() }); $('#vocHint').textContent = 'Saved. Transcripts and new recaps use it now.'; loadVocab(); }
+  catch (err) { toast(err.message); }
+});
+$('#vocTestBtn').addEventListener('click', async () => {
+  const text = $('#vocTest').value.trim(); if (!text) return;
+  try {
+    await api('/api/vocab', { method: 'POST', body: vocabFromForm() });
+    const r = await api('/api/vocab/test', { method: 'POST', body: { text } });
+    $('#vocOut').hidden = false; $('#vocOut').textContent = r.text;
+  } catch (err) { toast(err.message); }
+});
+$('#vocTest').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('#vocTestBtn').click(); });
+
+// ---------- backups ----------
+$('#BACKUP_ENABLED').addEventListener('change', () => { $('#backupBox').hidden = !$('#BACKUP_ENABLED').checked; });
+function showBackupStatus() {
+  const b = status?.backup; if (!b) return;
+  const when = b.last ? new Date(b.last).toLocaleString() : null;
+  $('#backupHint').innerHTML = b.running ? 'Backing up…'
+    : b.lastError ? `<span style="color:var(--red)">Last try failed: ${esc(b.lastError)}</span>`
+    : when ? `Last backup: ${esc(when)} (${b.files} files)` : (b.configured ? 'No backup yet.' : '');
+}
+$('#backupNowBtn').addEventListener('click', async (e) => {
+  if (!status?.backup?.configured) { toast('Turn on backups, fill in the repository, and click Save & restart bot first.'); return; }
+  e.target.disabled = true; $('#backupHint').textContent = 'Backing up…';
+  try { const r = await api('/api/backup/now', { method: 'POST', body: {} }); status.backup = r; showBackupStatus(); toast('Backed up.'); }
+  catch (err) { $('#backupHint').innerHTML = `<span style="color:var(--red)">${esc(err.message)}</span>`; }
+  e.target.disabled = false;
+});
+$('#restoreBtn').addEventListener('click', async (e) => {
+  if (!status?.backup?.configured) { toast('Turn on backups, fill in the repository, and click Save & restart bot first.'); return; }
+  if (!confirm('Restore from the backup? Sessions and settings from the backup are copied into Note Tiger. Files that differ are replaced with the backup\'s version; anything that isn\'t in the backup is kept.')) return;
+  e.target.disabled = true; $('#backupHint').textContent = 'Restoring…';
+  try {
+    const r = await api('/api/backup/restore', { method: 'POST', body: {} });
+    $('#backupHint').textContent = `Restored ${r.restored} file${r.restored === 1 ? '' : 's'} (${r.total} in the backup). Restart the bot to pick up restored settings.`;
+  } catch (err) { $('#backupHint').innerHTML = `<span style="color:var(--red)">${esc(err.message)}</span>`; }
+  e.target.disabled = false;
 });
 
 // ---------- activity log ----------
@@ -712,7 +854,7 @@ async function openSession(id, view = 'recap') {
   $('#sessView').innerHTML = `
     <h1>${esc(s.title)}</h1>
     <div class="hint">${esc(s.date)}${s.voiceChannel ? ` · ${esc(s.voiceChannel)}` : ''}${dur != null ? ` · ${Math.floor(dur / 60)}h ${dur % 60}m` : ''}${s.tableTalkLines ? ` · ${s.tableTalkLines} line${s.tableTalkLines === 1 ? '' : 's'} of table talk kept out of the recap` : ''}${s.recapLines ? ` · opening recap of last session (${s.recapLines} line${s.recapLines === 1 ? '' : 's'}) left out` : ''}</div>
-    ${renderMeter(s.stats)}
+    ${renderMeter(s.stats, s.colors)}
     <div id="progBox"></div>
     <div class="tabs2">
       <button class="btn ${view === 'recap' ? '' : 'ghost'}" data-v="recap">Recap</button>
@@ -779,7 +921,7 @@ function watchProgress(key) {
 }
 
 function fmtDur(ms) { const m = Math.round(ms / 60000); return m >= 60 ? `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, '0')}m` : `${m}m`; }
-function renderMeter(st) {
+function renderMeter(st, colors = {}) {
   if (!st) return '';
   const parts = [['#7bd88f', 'Playing the game', st.gameMs, st.gamePct], ['#f5a524', 'Squirrels', st.squirrelMs, st.squirrelPct],
     ['#9be7ef', 'Recap of last session', st.recapMs, st.recapPct], ['#5c6370', 'Quiet / breaks', st.quietMs, st.quietPct]].filter((p) => p[3] > 0);
@@ -787,7 +929,15 @@ function renderMeter(st) {
   return `<div class="meter"><b>🐿️ Squirrel-o-meter</b> <span class="hint">· ${fmtDur(st.totalMs)} session</span>
     <div class="bar">${parts.map(([c, l, , p]) => `<span style="width:${p}%;background:${c}" title="${l}: ${p}%"></span>`).join('')}</div>
     <div class="legend">${parts.map(([c, l, ms, p]) => `<span><i style="background:${c}"></i>${l} <b>${fmtDur(ms)}</b> (${p}%)</span>`).join('')}</div>
-    ${top ? `<div class="hint" style="margin-top:6px">Biggest squirrels: ${top}</div>` : ''}</div>`;
+    ${top ? `<div class="hint" style="margin-top:6px">Biggest squirrels: ${top}</div>` : ''}${renderSpotlight(st, colors)}</div>`;
+}
+// Who got the spotlight: each player's share of the talking during the game (the GM is left out).
+function renderSpotlight(st, colors) {
+  const sp = (st.spotlight || []).filter((p) => p.pct >= 1);
+  if (sp.length < 2) return '';
+  return `<div class="spot"><b>🔦 Spotlight</b> <span class="hint">· who talked during the game (GM not counted)</span>
+    ${sp.map((p) => `<div class="sp"><span class="nm">${esc(p.runner || p.name)}${p.runner ? ` <span class="hint">${esc(p.name)}</span>` : ''}</span>
+      <span class="trk"><span style="width:${Math.max(2, p.pct)}%;background:${colors[p.name] || 'var(--accent2)'}"></span></span><b>${p.pct}%</b></div>`).join('')}</div>`;
 }
 
 let showTableTalk = true;
@@ -868,6 +1018,12 @@ async function loadSettings() {
   $('#GITHUB_TOKEN').value = ''; $('#GITHUB_TOKEN').placeholder = s.GITHUB_TOKEN.set ? '•••••••• saved' : 'github_pat_…';
   $('#SITE_PASSWORD').value = ''; $('#SITE_PASSWORD').placeholder = s.SITE_PASSWORD.set ? '•••••••• saved' : 'Choose a group password';
   $('#siteBox').hidden = !$('#SITE_ENABLED').checked;
+  $('#BACKUP_ENABLED').checked = s.BACKUP_ENABLED === 'true';
+  $('#BACKUP_REPO').value = s.BACKUP_REPO || '';
+  $('#BACKUP_TOKEN').value = ''; $('#BACKUP_TOKEN').placeholder = s.BACKUP_TOKEN?.set ? '•••••••• saved' : 'Same as the website token';
+  $('#backupBox').hidden = !$('#BACKUP_ENABLED').checked;
+  showBackupStatus();
+  loadVocab();
   const url = status?.site?.url;
   $('#siteHint').innerHTML = url && status.site.configured ? `Site: <a href="${esc(url)}" target="_blank" style="color:var(--accent2)">${esc(url)}</a>` : '';
   const w = $('#WHISPER_MODEL');
@@ -892,6 +1048,9 @@ $('#saveBtn').addEventListener('click', async () => {
     SITE_SHARE_PASSWORD: $('#SITE_SHARE_PASSWORD').checked ? 'true' : 'false',
     GITHUB_TOKEN: $('#GITHUB_TOKEN').value.trim(),
     SITE_PASSWORD: $('#SITE_PASSWORD').value,
+    BACKUP_ENABLED: $('#BACKUP_ENABLED').checked ? 'true' : 'false',
+    BACKUP_REPO: $('#BACKUP_REPO').value.trim(),
+    BACKUP_TOKEN: $('#BACKUP_TOKEN').value.trim(),
     LOG_CHANNEL: $('#LOG_CHANNEL').value.replace(/^#/, '').trim() || 'logs',
     RECAP_CHANNEL: $('#RECAP_CHANNEL').value.replace(/^#/, '').trim() || 'recaps',
     GM_ROLE: $('#GM_ROLE').value.trim() || 'Game Master, GM, Storyteller, DM',

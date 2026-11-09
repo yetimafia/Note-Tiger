@@ -30,8 +30,14 @@ import {
 import { askAI, recapSession, buildArchive, ASK_SYSTEM, AI_LABEL, getProgress } from './ai.js';
 import { publishSite, siteConfigured, siteUrl } from './site.js';
 import { askBooks, listBooks, renderPage } from './library.js';
-import { buildCampaign, addEdit, campaignSummary, logRulesCall, npcKey } from './campaign.js';
-import { SITE_PASSWORD, SITE_SHARE_PASSWORD, LIB_PAGE_IMAGES } from './config.js';
+import { buildCampaign, addEdit, campaignSummary, logRulesCall, npcKey, latestStory, allQuotes } from './campaign.js';
+import { knownNames } from './spelling.js';
+import { SITE_PASSWORD, SITE_SHARE_PASSWORD, LIB_PAGE_IMAGES, USE_CLAUDE } from './config.js';
+
+const CATCHUP_SYSTEM = `You help a Shadowrun tabletop RPG player catch up on what they missed. You get the last few minutes of a
+messy speech-to-text transcript of the live session. In 3–8 short bullet points (Discord markdown), say what happened in the
+game: where the team is, what they're doing, decisions made, anything urgent. Mention out-of-game chatter only if it matters
+(a break, a rules call). Plain and quick to read. Never invent anything; if it's unclear, say so.`;
 
 // "🌐 Read it on the website: <link> · 🔑 Password: ||secret||" (the password is a Discord spoiler).
 function websiteLine(url = siteUrl(), withPassword = SITE_SHARE_PASSWORD) {
@@ -475,7 +481,10 @@ const commands = [
       .addStringOption((o) => o.setName('title').setDescription('e.g. "The Renraku Extraction"')))
     .addSubcommand((s) => s.setName('stop').setDescription('Stop recording and post the recap'))
     .addSubcommand((s) => s.setName('begin').setDescription('The recap of last session is done: the game starts now'))
-    .addSubcommand((s) => s.setName('status').setDescription('Show recording status')),
+    .addSubcommand((s) => s.setName('status').setDescription('Show recording status'))
+    .addSubcommand((s) => s.setName('catchup').setDescription('What happened in the last few minutes? (only you see it)')
+      .addIntegerOption((o) => o.setName('minutes').setDescription('How far back (default 15)').setMinValue(5).setMaxValue(90))
+      .addBooleanOption((o) => o.setName('public').setDescription('Post it for everyone instead of just you'))),
   new SlashCommandBuilder().setName('note').setDescription('Add a note to the current session')
     .addStringOption((o) => o.setName('text').setDescription('The note').setRequired(true)),
   new SlashCommandBuilder().setName('character').setDescription('Link yourself to your runner\'s name')
@@ -494,6 +503,11 @@ const commands = [
   new SlashCommandBuilder().setName('campaign').setDescription('Contacts and loose ends from your sessions')
     .addSubcommand((s) => s.setName('contacts').setDescription('Everyone the team has met (or details on one person)')
       .addStringOption((o) => o.setName('name').setDescription('Show one contact, e.g. "Mr. Johnson"')))
+    .addSubcommand((s) => s.setName('places').setDescription('Places the team has been (or details on one)')
+      .addStringOption((o) => o.setName('name').setDescription('Show one place, e.g. "The Big Rhino"')))
+    .addSubcommand((s) => s.setName('story').setDescription('The story of the campaign so far'))
+    .addSubcommand((s) => s.setName('quote').setDescription('A random Best Line from past sessions')
+      .addStringOption((o) => o.setName('search').setDescription('Only quotes containing this (word or name)')))
     .addSubcommand((s) => s.setName('threads').setDescription('Open loose ends: leads, debts, promises, threats'))
     .addSubcommand((s) => s.setName('close').setDescription('Mark a loose end as dealt with')
       .addIntegerOption((o) => o.setName('number').setDescription('Its number in /campaign threads').setRequired(true).setMinValue(1))
@@ -540,6 +554,26 @@ client.on('interactionCreate', async (interaction) => {
         rec.meta.playStartedAt = Date.now();
         writeJSON(path.join(rec.dir, 'meta.json'), rec.meta);
         return interaction.reply('▶️ **Game on!** Everything before this was the recap of last session, so it won\'t go into the new notes.');
+      }
+      if (sub === 'catchup') {
+        const rec = live.get(gid);
+        if (!rec) return interaction.reply({ content: 'Nothing is being recorded right now.', flags: MessageFlags.Ephemeral });
+        const minutes = interaction.options.getInteger('minutes') ?? 15;
+        const pub = interaction.options.getBoolean('public') ?? false;
+        await interaction.deferReply(pub ? {} : { flags: MessageFlags.Ephemeral });
+        const since = Date.now() - minutes * 60_000;
+        const lines = sessionLines(rec.dir).filter((l) => l.t >= since);
+        if (lines.length < 3) return interaction.editReply(`Not much was said in the last ${minutes} minutes.`);
+        let text = lines.map((l) => `${l.speaker}: ${l.text}`).join('\n');
+        const budget = USE_CLAUDE ? 80_000 : 12_000;
+        if (text.length > budget) text = text.slice(-budget);   // keep the most recent part
+        const names = knownNames(gid);
+        const summary = await askAI(CATCHUP_SYSTEM,
+          `${names ? `Correct spellings of names: ${names}\n\n` : ''}LAST ${minutes} MINUTES OF THE SESSION "${rec.meta.title}":\n${text}`, 700);
+        const parts = splitForDiscord(`⏪ **The last ${minutes} minutes**\n${summary}`);
+        await interaction.editReply(parts[0]);
+        for (const p of parts.slice(1)) await interaction.followUp(pub ? p : { content: p, flags: MessageFlags.Ephemeral });
+        return;
       }
       if (sub === 'status') {
         const rec = live.get(gid);
@@ -656,6 +690,31 @@ client.on('interactionCreate', async (interaction) => {
         if (!c.contacts.length) return interaction.reply({ content: 'No contacts yet. They\'re picked up from each session\'s recap.', flags: MessageFlags.Ephemeral });
         const list = c.contacts.map((x) => `• **${x.name}**${x.who ? ` — ${x.who}` : ''}${x.attitude ? ` · *${x.attitude}*` : ''}`).join('\n');
         return reply(`🕵️ **Contacts & NPCs (${c.contacts.length})**\n${list}\n*Details: \`/campaign contacts name:<name>\`*`);
+      }
+      if (sub === 'places') {
+        const name = interaction.options.getString('name');
+        if (name) {
+          const k = npcKey(name);
+          const hit = k && (c.places.find((x) => x.key === k) || c.places.find((x) => x.key.includes(k) || k.includes(x.key)));
+          if (!hit) return interaction.reply({ content: `I don't know a place called **${name}**. Try \`/campaign places\` for the full list.`, flags: MessageFlags.Ephemeral });
+          const hist = hit.history.map((h) => `• *${h.title} (${h.date}):* ${h.text}`).join('\n');
+          return reply(`📍 **${hit.name}**${hit.what ? ` — ${hit.what}` : ''}\nFirst visited: ${hit.first?.title ?? '?'} (${hit.first?.date ?? '?'})${hist ? `\n\n${hist}` : ''}`);
+        }
+        if (!c.places.length) return interaction.reply({ content: 'No places yet. They\'re picked up from each session\'s recap.', flags: MessageFlags.Ephemeral });
+        const list = c.places.map((x) => `• **${x.name}**${x.what ? ` — ${x.what}` : ''}`).join('\n');
+        return reply(`📍 **Places (${c.places.length})**\n${list}\n*Details: \`/campaign places name:<place>\`*`);
+      }
+      if (sub === 'story') {
+        const st = latestStory(gid);
+        if (!st) return interaction.reply({ content: 'No story yet. It\'s written along with each session\'s recap.', flags: MessageFlags.Ephemeral });
+        return reply(`📖 **The story so far** *(through ${st.title}, ${st.date})*\n\n${st.text}`);
+      }
+      if (sub === 'quote') {
+        const q = (interaction.options.getString('search') || '').toLowerCase();
+        const all = allQuotes(gid).filter((x) => !q || `${x.quote} ${x.by}`.toLowerCase().includes(q));
+        if (!all.length) return interaction.reply({ content: q ? 'No quotes match that.' : 'No quotes yet. They come from the Best Lines in each recap.', flags: MessageFlags.Ephemeral });
+        const x = all[Math.floor(Math.random() * all.length)];
+        return interaction.reply(`💬 *“${x.quote}”*\n— **${x.by}**${x.tableTalk ? ' (table talk)' : ''} · ${x.title}, ${x.date}`);
       }
       if (sub === 'threads') {
         if (!c.open.length && !c.closed.length) return interaction.reply({ content: 'No loose ends yet. They\'re picked up from each session\'s recap, or add one with `/campaign add`.', flags: MessageFlags.Ephemeral });
