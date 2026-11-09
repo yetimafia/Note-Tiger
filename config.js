@@ -41,6 +41,14 @@ export const SITE_SHARE_PASSWORD = e.SITE_SHARE_PASSWORD !== 'false';
 export const BACKUP_ENABLED = e.BACKUP_ENABLED === 'true';
 export const BACKUP_REPO = (e.BACKUP_REPO || '').trim().replace(/^https?:\/\/github\.com\//, '').replace(/\.git$|\/$/g, '');
 export const BACKUP_TOKEN = e.BACKUP_TOKEN || e.GITHUB_TOKEN || '';
+// GM prep note: sent privately to the game master(s) a few hours before game night.
+export const PREP_ENABLED = e.PREP_ENABLED === 'true';
+export const GAME_DAY = e.GAME_DAY === undefined || e.GAME_DAY === '' ? null : Number(e.GAME_DAY);   // 0 = Sunday … 6 = Saturday
+export const GAME_TIME = /^\d{1,2}:\d{2}$/.test(e.GAME_TIME || '') ? e.GAME_TIME : '19:00';
+export const PREP_HOURS = Math.max(1, Math.min(72, Number(e.PREP_HOURS || 3)));
+// Updates: checks the GitHub releases of this repository for a newer Note Tiger.
+export const UPDATE_REPO = e.UPDATE_REPO || 'yetimafia/Note-Tiger';
+export const UPDATE_CHECK = e.UPDATE_CHECK !== 'false';
 // Attach a picture of the cited rulebook page to /game ask answers.
 export const LIB_PAGE_IMAGES = e.LIB_PAGE_IMAGES !== 'false';
 // Discord role(s) that mark the game master / storyteller (comma-separated, not case-sensitive).

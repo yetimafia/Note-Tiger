@@ -10,7 +10,9 @@ import { listSessions, readSession, sessionDir, knownGuilds, transcriptHtml } fr
 import { buildCampaign, addEdit, latestStory, allQuotes } from './campaign.js';
 import { backupNow, restoreBackup, backupStatus, backupConfigured, startBackupSchedule } from './backup.js';
 import { readVocab, saveVocab, fixText } from './spelling.js';
-import { recapSession, askArchive, ollamaStatus, refreshOllama, AI_LABEL, getProgress } from './ai.js';
+import { updateStatus, checkForUpdate, installUpdate, startUpdateChecks, CURRENT_VERSION } from './updater.js';
+import { gmPrep } from './campaign.js';
+import { recapSession, askArchive, ollamaStatus, refreshOllama, AI_LABEL, getProgress, askAI } from './ai.js';
 import { startWeb } from './web.js';
 import { publishSite, siteStatus, siteConfigured } from './site.js';
 import { LIB_DIR, listBooks, syncLibrary, libraryProgress, addBook, removeBook, askBooks, renderPage } from './library.js';
@@ -147,6 +149,8 @@ startWeb({
       guilds: guildList(),
       site: siteStatus(),
       backup: backupStatus(),
+      update: updateStatus(),
+      version: CURRENT_VERSION,
       progress: this.progress(),
     };
   },
@@ -198,6 +202,12 @@ startWeb({
     return { ...c, story: latestStory(gid), quotes: allQuotes(gid) };
   },
   backupNow() { return backupNow('manual'); },
+  checkUpdate() { return checkForUpdate(); },
+  installUpdate() {
+    if ((botStatus?.guilds || []).some((g) => g.recording)) throw new Error('A session is recording. Update after you stop it.');
+    return installUpdate(async () => { await stopBot(); });
+  },
+  async gmPrep(gid) { return { note: await gmPrep(safeGid(gid), askAI) }; },
   async restoreBackup() {
     if ((botStatus?.guilds || []).some((g) => g.recording)) throw new Error('Stop the recording before restoring.');
     return restoreBackup();
@@ -276,6 +286,7 @@ if (DISCORD_TOKEN && AUTO_START) {
 }
 
 startBackupSchedule();
+startUpdateChecks();
 
 // Rulebooks: index anything new now, and whenever PDFs are added to or removed from the library folder.
 syncLibrary().catch((e) => console.error('[library]', e.message));

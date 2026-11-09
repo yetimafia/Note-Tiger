@@ -7,7 +7,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { CAMPAIGN_NAME, USE_CLAUDE } from './config.js';
-import { listSessions, readJSON, writeJSON, guildDir, gidOf, getSettings, sessionLines, baseName } from './store.js';
+import { listSessions, readJSON, writeJSON, guildDir, gidOf, getSettings, sessionLines, baseName, sessionStats, speakerColors } from './store.js';
 import { setCampaignNames, knownNames } from './spelling.js';
 
 const editsFile = (gid) => path.join(guildDir(gid), 'campaign-edits.json');
@@ -40,6 +40,7 @@ export function buildCampaign(gid, { upTo = null } = {}) {
 
   const npcs = new Map();      // key -> contact
   const places = new Map();    // key -> place
+  const runners = new Map();   // key -> runner profile
   const removedPlaces = new Set();
   const threads = new Map();   // id -> thread
   const removedNpcs = new Set();
@@ -69,6 +70,15 @@ export function buildCampaign(gid, { upTo = null } = {}) {
         c.last = at;
         if (p.happened) c.history.push({ ...at, text: p.happened });
         places.set(key, c);
+      }
+      for (const r of ev.found.runners || []) {
+        const key = npcKey(r.name);
+        const c = runners.get(key) || { key, name: r.name, first: at, sessions: [], gear: [], status: '' };
+        c.last = at;
+        c.sessions.push({ ...at, did: r.did, moment: r.moment, talkPct: r.talkPct });
+        for (const g of r.gear || []) if (!c.gear.some((x) => npcKey(x) === npcKey(g))) c.gear.push(g);
+        c.status = r.status || '';
+        runners.set(key, c);
       }
       for (const th of ev.found.threads || []) {
         if (removedThreads.has(th.id)) continue;
@@ -108,7 +118,14 @@ export function buildCampaign(gid, { upTo = null } = {}) {
   const open = all.filter((t) => t.status === 'open');
   const closed = all.filter((t) => t.status === 'closed').reverse();
   open.forEach((t, i) => { t.n = i + 1; });   // the numbers people use in /campaign close
-  return { contacts, places: [...places.values()].sort((a, b) => a.name.localeCompare(b.name)), open, closed };
+  // Runner profiles: who plays them and their color come from the transcripts and settings.
+  const roster = runners.size ? runnerRoster(gid) : new Map();
+  const colors = runners.size ? speakerColors(gid, []) : {};
+  const runnerList = [...runners.values()].map((r) => {
+    const player = roster.get(r.name) || null;
+    return { ...r, player, color: (player && colors[player]) || null, gear: r.gear.slice(-30) };
+  }).sort((a, b) => b.sessions.length - a.sessions.length || a.name.localeCompare(b.name));
+  return { contacts, places: [...places.values()].sort((a, b) => a.name.localeCompare(b.name)), runners: runnerList, open, closed };
 }
 
 // Contact and place names feed the spelling fixer.
@@ -129,6 +146,7 @@ You get the recap of ONE session, the contacts/NPCs the team already knows, and 
 Reply with JSON only, exactly this shape:
 {"npcs":[{"name":"...","who":"...","attitude":"...","happened":"..."}],
  "places":[{"name":"...","what":"...","happened":"..."}],
+ "runners":[{"name":"...","did":"...","moment":"...","gear":["..."],"status":"..."}],
  "newLooseEnds":["..."],
  "resolved":[{"id":"T3","how":"..."}]}
 
@@ -141,6 +159,11 @@ places: every NAMED location that mattered this session (bars, safehouses, corp 
   If it's already known, use the known name exactly.
   what: a few words on what kind of place it is ("ork-run bar in Redmond"). Empty if nothing new.
   happened: one short sentence on what happened there THIS session.
+runners: one entry per PLAYER CHARACTER (from the RUNNERS list only) who did something this session.
+  did: one or two sentences on what they did this session.
+  moment: their standout moment (a clutch roll, a great line, a disaster), or empty.
+  gear: new gear, cyberware, spells, vehicles or drones they got or used notably (short names), or [].
+  status: injuries, debts, heat or conditions they're left with, or empty.
 newLooseEnds: new open questions, leads, debts, promises and threats from THIS session that the team may follow up
   on. One short sentence each. Don't repeat ones already in the open list.
 resolved: open loose ends (by their id) that this session clearly settled, with a few words on how.
@@ -152,6 +175,24 @@ function parseJSON(text) {
   try { return JSON.parse(m[0]); } catch { return null; }
 }
 const clean = (v, max) => String(v ?? '').replace(/\s+/g, ' ').trim().slice(0, max);
+
+// Runner (player character) name -> player name, from /character and the speaker labels.
+const rosterCache = new Map();
+export function runnerRoster(gid) {
+  const hit = rosterCache.get(gid);
+  if (hit && Date.now() - hit.at < 60_000) return hit.roster;
+  const dirs = listSessions(gid).map((x) => x.dir);
+  const roster = new Map();
+  for (const dir of dirs) {
+    for (const l of sessionLines(dir, { raw: true })) {
+      const runner = String(l.speaker).match(/\(([^)]+)\)\s*$/)?.[1];
+      if (runner && !/^GM\b/.test(runner) && !l.gm) roster.set(runner, baseName(l.speaker));
+    }
+  }
+  for (const r of Object.values(getSettings(gid).characters || {})) if (r && !roster.has(r)) roster.set(r, null);
+  rosterCache.set(gid, { at: Date.now(), roster });
+  return roster;
+}
 
 // Player names and runner names, so the players themselves never end up in the contact list.
 function playerKeys(gid, dir) {
@@ -173,9 +214,11 @@ export async function updateCampaign(dir, recap, askAI) {
   const ids = new Map(before.open.map((t) => [`T${t.n}`, t.id]));
   const open = before.open.map((t) => `[T${t.n}] ${t.text}`).join('\n') || '(none)';
   const budget = USE_CLAUDE ? 60_000 : 9_000;
-  const user = `KNOWN CONTACTS:\n${known.slice(0, budget / 4)}\n\nKNOWN PLACES:\n${knownPlaces.slice(0, budget / 5)}\n\nOPEN LOOSE ENDS:\n${open.slice(0, budget / 3)}\n\n` +
+  const roster = runnerRoster(gid);
+  const runnersList = [...roster].map(([r, p]) => `- ${r}${p ? ` (played by ${p})` : ''}`).join('\n') || '(unknown)';
+  const user = `RUNNERS (the player characters):\n${runnersList}\n\nKNOWN CONTACTS:\n${known.slice(0, budget / 4)}\n\nKNOWN PLACES:\n${knownPlaces.slice(0, budget / 5)}\n\nOPEN LOOSE ENDS:\n${open.slice(0, budget / 3)}\n\n` +
     `THIS SESSION'S RECAP:\n${String(recap).slice(0, budget)}`;
-  const raw = await askAI(CAMPAIGN_SYSTEM, user, 2500, { json: true });
+  const raw = await askAI(CAMPAIGN_SYSTEM, user, 3500, { json: true });
   const data = parseJSON(raw);
   if (!data) throw new Error('the AI did not answer in the expected format');
 
@@ -189,6 +232,21 @@ export async function updateCampaign(dir, recap, askAI) {
     places: (Array.isArray(data.places) ? data.places : [])
       .map((p) => ({ name: clean(p?.name, 60), what: clean(p?.what, 120), happened: clean(p?.happened, 300) }))
       .filter((p) => p.name && !players.has(npcKey(p.name))),
+    runners: (() => {
+      const byKey = new Map([...roster.keys()].map((r) => [npcKey(r), r]));
+      const spot = new Map((sessionStats(dir)?.spotlight || []).filter((x) => x.runner).map((x) => [npcKey(x.runner), x.pct]));
+      const out = [];
+      for (const r of Array.isArray(data.runners) ? data.runners : []) {
+        const name = byKey.get(npcKey(r?.name)) || [...byKey].find(([k]) => k && npcKey(r?.name).includes(k))?.[1];
+        if (!name || out.some((x) => x.name === name)) continue;
+        out.push({
+          name, did: clean(r?.did, 400), moment: clean(r?.moment, 250), status: clean(r?.status, 200),
+          gear: (Array.isArray(r?.gear) ? r.gear : []).map((g) => clean(g, 60)).filter(Boolean).slice(0, 10),
+          talkPct: spot.get(npcKey(name)) ?? null,
+        });
+      }
+      return out;
+    })(),
     threads: (Array.isArray(data.newLooseEnds) ? data.newLooseEnds : [])
       .map((t) => clean(typeof t === 'string' ? t : t?.text, 250)).filter(Boolean).slice(0, 15)
       .map((text, i) => ({ id: `${sid}#${i + 1}`, text })),
@@ -325,4 +383,45 @@ export function allQuotes(gid) {
     if (!fs.existsSync(f)) return [];
     return quotesFromRecap(fs.readFileSync(f, 'utf8')).map((q) => ({ ...q, title: s.title, date: s.date }));
   });
+}
+
+// ---------- GM prep note ----------
+const PREP_SYSTEM = `You help the game master of ${CAMPAIGN_NAME}, a Shadowrun tabletop RPG campaign, get ready for the next
+session. From the campaign notes you get, write a short prep note in Discord markdown with these sections (skip empty ones):
+**⏮️ Where we left off** — 2–4 sentences.
+**🧵 Threads to pull** — the open loose ends most worth bringing back, one line each, with why.
+**🕵️ Who might show up** — contacts likely to return and how they feel about the team.
+**🧠 Things the players may have forgotten** — promises, debts, injuries, gear.
+**💡 Ideas** — 2–3 short hook ideas, clearly marked as suggestions.
+Keep it under 350 words. Use only the notes; never present an idea as something that happened.`;
+
+export async function gmPrep(gid, askAI) {
+  const c = buildCampaign(gid);
+  const story = latestStory(gid);
+  const sessions = listSessions(gid);
+  const last = [...sessions].reverse().find((s) => fs.existsSync(path.join(s.dir, 'recap.md')));
+  const lastRecap = last ? fs.readFileSync(path.join(last.dir, 'recap.md'), 'utf8') : '';
+  const recent = new Set(sessions.slice(-3).map((s) => path.basename(s.dir)));
+  const contacts = c.contacts.filter((x) => recent.has(x.last?.id)).concat(c.contacts.filter((x) => !recent.has(x.last?.id))).slice(0, 25);
+  const notes = [
+    story ? `STORY SO FAR:\n${story.text}` : '',
+    last ? `LAST SESSION (${last.title}, ${last.date}) RECAP:\n${lastRecap.slice(0, USE_CLAUDE ? 30_000 : 5_000)}` : '',
+    c.open.length ? `OPEN LOOSE ENDS:\n${c.open.map((t) => `- ${t.text} (since ${t.opened?.title || '?'})`).join('\n')}` : '',
+    contacts.length ? `CONTACTS:\n${contacts.map((x) => `- ${x.name}${x.who ? `: ${x.who}` : ''}${x.attitude ? ` [${x.attitude}]` : ''} (last seen ${x.last?.title || '?'})`).join('\n')}` : '',
+    c.runners.length ? `RUNNERS:\n${c.runners.map((r) => `- ${r.name}${r.player ? ` (${r.player})` : ''}${r.status ? `: ${r.status}` : ''}${r.gear.length ? `; gear: ${r.gear.slice(-6).join(', ')}` : ''}`).join('\n')}` : '',
+  ].filter(Boolean).join('\n\n');
+  if (!notes) return null;
+  const head = `🎲 **GM prep for ${CAMPAIGN_NAME}**${last ? ` · after *${last.title}* (${last.date})` : ''}`;
+  try {
+    const text = (await askAI(PREP_SYSTEM, notes.slice(0, USE_CLAUDE ? 120_000 : 14_000), 1200)).trim();
+    if (text.length > 60) return `${head}\n\n${text}`;
+  } catch (err) {
+    console.error('[prep] AI failed, sending the plain notes:', err.message);
+  }
+  // Without the AI: the raw lists still help.
+  const parts = [head];
+  if (story) parts.push(`**⏮️ Where we left off**\n${story.text.split(/\n\s*\n/).pop()}`);
+  if (c.open.length) parts.push(`**🧵 Open loose ends**\n${c.open.map((t) => `${t.n}. ${t.text}`).join('\n')}`);
+  if (contacts.length) parts.push(`**🕵️ Recent contacts**\n${contacts.slice(0, 10).map((x) => `• ${x.name}${x.attitude ? ` — ${x.attitude}` : ''}`).join('\n')}`);
+  return parts.join('\n\n');
 }

@@ -16,6 +16,10 @@ Built for Shadowrun, and it works for any game played over Discord voice.
 - 🔦 **Spotlight meter**: how much each runner talked during the game, next to the squirrel-o-meter
 - 🔤 **Spelling fixes**: "wren rocky" becomes Renraku; add your own names and fixes in Settings
 - 💾 **Backups** to a private GitHub repository, with one-click restore on a new PC
+- 🏃 **Runner profiles**: what each character has done, big moments, gear and how they're doing
+- 🔎 **Search every session** on the player website
+- 🎲 **GM prep note**: privately messaged to the GM before game night (or `/campaign prep` any time)
+- ✨ **Automatic updates**: Note Tiger tells you when there's a new version and updates itself in one click
 - 📚 **Rulebook lookup**: add your game PDFs, then `/game ask` tells you the book, the printed page number and a quick description
 - 🧠 Answers questions about past sessions: *"What did Mr. Johnson offer us for the Ares job?"*
 - 🖥️ A proper Windows app: a Note Tiger window with **Start / Stop bot**, sessions, questions and settings, plus a 🐯 tray icon so you know it's running
@@ -80,6 +84,8 @@ Download this repo (green **Code** button → **Download ZIP**), unzip it **outs
 | `/campaign contacts` | Everyone the team has met, with who they are and how they feel about you. Add `name:` for one person's history. |
 | `/session catchup` | Missed something? A quick summary of the last 15 minutes (or `minutes:30`), just for you. |
 | `/campaign places` · `/campaign story` · `/campaign quote` | Places you've been, the campaign story so far, and a random Best Line. |
+| `/campaign runner name:Ghost` | A runner's profile: sessions, big moments, gear, current state. |
+| `/campaign prep` | GM only: a private prep note for the next session. Set game night in Settings to get it automatically. |
 | `/campaign threads` | Open loose ends, numbered. `/campaign close number:2 how:Paid him back` ties one up; `/campaign add text:…` adds one. Fix anything else in Note Tiger → **Campaign**. |
 | `/repost` | Posts a session's recap **and** transcript to #recaps / #logs again, marked 🔁 Updated (e.g. after **Rewrite recap**). Also a **Repost to Discord** button on each session in Note Tiger. |
 | `/optout mode:on` | The bot won't record that person's voice. |

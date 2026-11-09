@@ -3,6 +3,9 @@
 Unicode true
 !include "MUI2.nsh"
 !include "LogicLib.nsh"
+!include "FileFunc.nsh"
+
+Var IsUpdate
 
 !ifndef VERSION
   !define VERSION "1.0.0"
@@ -110,6 +113,27 @@ SectionEnd
   !insertmacro MUI_DESCRIPTION_TEXT ${SecStartup} "Start Note Tiger automatically when you log in to Windows."
   !insertmacro MUI_DESCRIPTION_TEXT ${SecOllama} "Installs Ollama and a free AI model so recaps cost nothing and never leave your PC. Skip this if you'll use a Claude API key instead, or if it's already installed."
 !insertmacro MUI_FUNCTION_DESCRIPTION_END
+
+; Started by Note Tiger's "Update now": quiet install that keeps your shortcuts as they are, skips the
+; local-AI download, and starts Note Tiger again at the end.
+Function .onInit
+  StrCpy $IsUpdate 0
+  ${GetParameters} $R0
+  ClearErrors
+  ${GetOptions} $R0 "/UPDATE" $R1
+  ${IfNot} ${Errors}
+    StrCpy $IsUpdate 1
+    SectionSetFlags ${SecDesktop} 0
+    SectionSetFlags ${SecStartup} 0
+    SectionSetFlags ${SecOllama} 0
+  ${EndIf}
+FunctionEnd
+
+Section "-Restart after update"
+  ${If} $IsUpdate == 1
+    Exec '"$INSTDIR\Note Tiger.exe"'
+  ${EndIf}
+SectionEnd
 
 Section "Uninstall"
   !insertmacro StopRunningCopy

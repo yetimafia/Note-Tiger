@@ -30,9 +30,9 @@ import {
 import { askAI, recapSession, buildArchive, ASK_SYSTEM, AI_LABEL, getProgress } from './ai.js';
 import { publishSite, siteConfigured, siteUrl } from './site.js';
 import { askBooks, listBooks, renderPage } from './library.js';
-import { buildCampaign, addEdit, campaignSummary, logRulesCall, npcKey, latestStory, allQuotes } from './campaign.js';
+import { buildCampaign, addEdit, campaignSummary, logRulesCall, npcKey, latestStory, allQuotes, gmPrep } from './campaign.js';
 import { knownNames } from './spelling.js';
-import { SITE_PASSWORD, SITE_SHARE_PASSWORD, LIB_PAGE_IMAGES, USE_CLAUDE } from './config.js';
+import { SITE_PASSWORD, SITE_SHARE_PASSWORD, LIB_PAGE_IMAGES, USE_CLAUDE, PREP_ENABLED, GAME_DAY, GAME_TIME, PREP_HOURS } from './config.js';
 
 const CATCHUP_SYSTEM = `You help a Shadowrun tabletop RPG player catch up on what they missed. You get the last few minutes of a
 messy speech-to-text transcript of the live session. In 3–8 short bullet points (Discord markdown), say what happened in the
@@ -506,6 +506,9 @@ const commands = [
     .addSubcommand((s) => s.setName('places').setDescription('Places the team has been (or details on one)')
       .addStringOption((o) => o.setName('name').setDescription('Show one place, e.g. "The Big Rhino"')))
     .addSubcommand((s) => s.setName('story').setDescription('The story of the campaign so far'))
+    .addSubcommand((s) => s.setName('runner').setDescription('A runner\'s profile: what they\'ve done, big moments, gear')
+      .addStringOption((o) => o.setName('name').setDescription('Runner name (leave empty for everyone)')))
+    .addSubcommand((s) => s.setName('prep').setDescription('GM prep note for the next session (only you see it)'))
     .addSubcommand((s) => s.setName('quote').setDescription('A random Best Line from past sessions')
       .addStringOption((o) => o.setName('search').setDescription('Only quotes containing this (word or name)')))
     .addSubcommand((s) => s.setName('threads').setDescription('Open loose ends: leads, debts, promises, threats'))
@@ -704,6 +707,34 @@ client.on('interactionCreate', async (interaction) => {
         const list = c.places.map((x) => `• **${x.name}**${x.what ? ` — ${x.what}` : ''}`).join('\n');
         return reply(`📍 **Places (${c.places.length})**\n${list}\n*Details: \`/campaign places name:<place>\`*`);
       }
+      if (sub === 'runner') {
+        const name = interaction.options.getString('name');
+        if (!c.runners.length) return interaction.reply({ content: 'No runner profiles yet. They\'re built from each session\'s recap.', flags: MessageFlags.Ephemeral });
+        if (!name) {
+          const list = c.runners.map((r) => `• **${r.name}**${r.player ? ` (${r.player})` : ''} · ${r.sessions.length} session${r.sessions.length === 1 ? '' : 's'}${r.status ? ` · *${r.status}*` : ''}`).join('\n');
+          return reply(`🏃 **Runners (${c.runners.length})**\n${list}\n*Profile: \`/campaign runner name:<runner>\`*`);
+        }
+        const k = npcKey(name);
+        const r = k && (c.runners.find((x) => x.key === k) || c.runners.find((x) => x.key.includes(k) || k.includes(x.key)));
+        if (!r) return interaction.reply({ content: `No runner called **${name}**. Try \`/campaign runner\` for the list.`, flags: MessageFlags.Ephemeral });
+        const moments = r.sessions.filter((x) => x.moment).slice(-5).map((x) => `• *${x.title}:* ${x.moment}`).join('\n');
+        const did = r.sessions.slice(-6).map((x) => `• *${x.title} (${x.date}):* ${x.did}${x.talkPct != null ? ` · 🔦 ${x.talkPct}%` : ''}`).join('\n');
+        return reply(`🏃 **${r.name}**${r.player ? ` · played by ${r.player}` : ''}\n` +
+          `${r.sessions.length} session${r.sessions.length === 1 ? '' : 's'} since *${r.first?.title}*${r.status ? `\nRight now: **${r.status}**` : ''}` +
+          `${r.gear.length ? `\n🧰 ${r.gear.slice(-12).join(', ')}` : ''}${moments ? `\n\n⭐ **Big moments**\n${moments}` : ''}\n\n📼 **Recent sessions**\n${did}`);
+      }
+      if (sub === 'prep') {
+        const member = interaction.member;
+        const anyGmRole = guild.roles.cache.some((r) => GM_ROLES.includes(r.name.toLowerCase()));
+        if (anyGmRole && !isGM(member)) return interaction.reply({ content: 'The prep note is for the game master (it may suggest plot hooks).', flags: MessageFlags.Ephemeral });
+        await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+        const note = await gmPrep(gid, askAI);
+        if (!note) return interaction.editReply('Nothing to prep from yet: record a session first.');
+        const parts = splitForDiscord(note);
+        await interaction.editReply(parts[0]);
+        for (const p of parts.slice(1)) await interaction.followUp({ content: p, flags: MessageFlags.Ephemeral });
+        return;
+      }
       if (sub === 'story') {
         const st = latestStory(gid);
         if (!st) return interaction.reply({ content: 'No story yet. It\'s written along with each session\'s recap.', flags: MessageFlags.Ephemeral });
@@ -766,6 +797,51 @@ client.on('interactionCreate', async (interaction) => {
     else await interaction.reply({ content: msg, flags: MessageFlags.Ephemeral }).catch(() => {});
   }
 });
+
+// ---------- GM prep note before game night ----------
+// Every few minutes: if game night is within PREP_HOURS and the note wasn't sent for it yet, DM the GM(s).
+function nextGameNight(now = new Date()) {
+  if (GAME_DAY === null || !Number.isInteger(GAME_DAY) || GAME_DAY < 0 || GAME_DAY > 6) return null;
+  const [h, m] = GAME_TIME.split(':').map(Number);
+  const d = new Date(now);
+  d.setHours(h, m, 0, 0);
+  d.setDate(d.getDate() + ((GAME_DAY - d.getDay() + 7) % 7));
+  if (d <= now) d.setDate(d.getDate() + 7);
+  return d;
+}
+async function prepCheck() {
+  if (!PREP_ENABLED || !client.isReady()) return;
+  const game = nextGameNight();
+  if (!game || game - Date.now() > PREP_HOURS * 3600_000) return;
+  const stamp = game.toISOString();
+  for (const guild of client.guilds.cache.values()) {
+    const file = path.join(sessionsDir(guild.id), '..', 'prep-state.json');
+    const st = readJSON(file, {});
+    if (st.sentFor === stamp || live.has(guild.id) || !listSessions(guild.id).length) continue;
+    writeJSON(file, { ...st, sentFor: stamp, sentAt: new Date().toISOString() });   // mark first: never send twice
+    try {
+      const members = await guild.members.fetch();
+      const gms = [...members.values()].filter((m) => !m.user.bot && isGM(m));
+      if (!gms.length) { console.log(`[prep] no one in ${guild.name} has a GM role, so no prep note was sent`); continue; }
+      const note = await gmPrep(guild.id, askAI);
+      if (!note) continue;
+      const when = game.toLocaleString([], { weekday: 'long', hour: 'numeric', minute: '2-digit' });
+      for (const gm of gms) {
+        try {
+          const parts = splitForDiscord(`${note}\n\n*Game night: ${when} · from ${guild.name}. Get this any time with \`/campaign prep\`.*`);
+          for (const p of parts) await gm.send(p);
+          console.log(`[prep] sent to ${gm.displayName}`);
+        } catch (err) {
+          console.error(`[prep] couldn't message ${gm.displayName} (their DMs may be closed):`, err.message);
+        }
+      }
+    } catch (err) {
+      console.error('[prep]', err.message);
+    }
+  }
+}
+setInterval(() => prepCheck().catch((e) => console.error('[prep]', e.message)), 5 * 60_000);
+client.once('clientReady', () => setTimeout(() => prepCheck().catch(() => {}), 60_000));
 
 // ---------- talking to the manager ----------
 function report() {

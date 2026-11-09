@@ -30,6 +30,11 @@ export const SETTINGS = [
   { key: 'BACKUP_ENABLED' },
   { key: 'BACKUP_REPO' },
   { key: 'BACKUP_TOKEN', secret: true },
+  { key: 'PREP_ENABLED' },
+  { key: 'GAME_DAY' },
+  { key: 'GAME_TIME' },
+  { key: 'PREP_HOURS' },
+  { key: 'UPDATE_CHECK' },
 ];
 
 function readEnvLines() {
@@ -210,6 +215,11 @@ export function startWeb(ctx, port) {
         }
       }
 
+      // Updates
+      if (parts[1] === 'update' && parts[2] === 'check' && req.method === 'POST') return send(res, 200, await ctx.checkUpdate());
+      if (parts[1] === 'update' && parts[2] === 'install' && req.method === 'POST') return send(res, 200, await ctx.installUpdate());
+      // GM prep note
+      if (parts[1] === 'campaign' && parts[2] && parts[3] === 'prep' && req.method === 'POST') return send(res, 200, await ctx.gmPrep(parts[2]));
       // Backups
       if (parts[1] === 'backup' && parts[2] === 'now' && req.method === 'POST') return send(res, 200, await ctx.backupNow());
       if (parts[1] === 'backup' && parts[2] === 'restore' && req.method === 'POST') return send(res, 200, await ctx.restoreBackup());

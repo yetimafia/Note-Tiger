@@ -56,7 +56,7 @@ export function encryptJSON(obj, key) {
 }
 
 // ---------- what gets published ----------
-function sessionPayload(dir) {
+export function sessionPayload(dir) {
   const meta = readJSON(path.join(dir, 'meta.json'), {});
   const gid = gidOf(dir);
   const entries = transcriptEntries(sessionLines(dir), readJSON(path.join(dir, 'notes.json'), []), readLabels(dir));
@@ -97,12 +97,14 @@ export function manifestFor(st, dirs) {
       server: knownGuilds().find((g) => g.id === gid)?.name || '',
       contacts: c.contacts.map((n) => ({ name: n.name, who: n.who, attitude: n.attitude, first: at(n.first), history: n.history.map((h) => ({ date: h.date, title: h.title, text: h.text })) })),
       places: c.places.map((n) => ({ name: n.name, what: n.what, first: at(n.first), history: n.history.map((h) => ({ date: h.date, title: h.title, text: h.text })) })),
+      runners: c.runners.map((r) => ({ name: r.name, player: r.player, color: r.color, status: r.status, gear: r.gear, first: at(r.first),
+        sessions: r.sessions.map((x) => ({ title: x.title, date: x.date, did: x.did, moment: x.moment, talkPct: x.talkPct })) })),
       story: latestStory(gid),
       quotes: allQuotes(gid),
       open: c.open.map((t) => ({ n: t.n, text: t.text, opened: at(t.opened) })),
       closed: c.closed.map((t) => ({ text: t.text, how: t.how, opened: at(t.opened), closed: at(t.closed) })),
     };
-  }).filter((t) => t.contacts.length || t.places.length || t.open.length || t.closed.length || t.story || t.quotes.length);
+  }).filter((t) => t.contacts.length || t.places.length || t.runners.length || t.open.length || t.closed.length || t.story || t.quotes.length);
   return { campaign: CAMPAIGN_NAME, updated: new Date().toISOString(), sessions, trackers };
 }
 

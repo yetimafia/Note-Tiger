@@ -45,7 +45,7 @@
   button:disabled { opacity: .5; cursor: wait; }
   label { display: block; font-weight: 600; margin: 14px 0 4px; }
   .hint { color: var(--dim); font-size: 13px; margin-top: 3px; }
-  input[type=text], input[type=password], select, textarea {
+  input[type=text], input[type=password], input[type=time], input[type=number], select, textarea {
     width: 100%; background: var(--bg); color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 9px 11px; font: inherit;
   }
   input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
@@ -79,6 +79,12 @@
   .camp { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr); gap: 16px; align-items: start; }
   @media (max-width: 900px) { .camp { grid-template-columns: minmax(0,1fr); } }
   .camp > div > .card { margin-bottom: 16px; }
+  .runners { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; margin-top: 12px; }
+  .runner { background: var(--bg); border: 1px solid var(--line); border-top: 4px solid var(--accent2); border-radius: 10px; padding: 12px 14px; }
+  .runner .rn { font-weight: 700; font-size: 16px; }
+  .runner ul { margin: 6px 0; padding-left: 18px; font-size: 14px; }
+  .runner .gear { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+  .runner .gear span { font-size: 12px; background: var(--panel2); border: 1px solid var(--line); border-radius: 99px; padding: 0 8px; }
   .quote { border-left: 3px solid var(--accent); padding: 4px 12px; margin: 10px 0; }
   .quote .by { color: var(--dim); font-size: 13px; }
   .npc { border-bottom: 1px solid var(--line); padding: 10px 0; }
@@ -210,12 +216,18 @@
   <!-- CAMPAIGN -->
   <section id="tab-campaign" hidden>
     <div class="row" style="justify-content:space-between">
-      <div><h1>🕵️ Campaign</h1><p class="sub">Contacts and loose ends, picked up from every recap. Fix anything the AI got wrong here.</p></div>
+      <div><h1>🕵️ Campaign</h1><p class="sub">Runners, contacts, places and loose ends, picked up from every recap. Fix anything the AI got wrong here.</p></div>
       <select id="campGuild" style="width:auto;min-width:200px"></select>
     </div>
     <div class="card" id="campStoryCard">
       <details id="campStoryBox"><summary style="cursor:pointer"><h2 style="display:inline;margin:0">📖 The story so far</h2> <span class="hint" id="campStoryWhen"></span></summary>
         <div class="recap" id="campStory" style="margin-top:10px"></div></details>
+    </div>
+    <div class="card">
+      <div class="row" style="justify-content:space-between"><h2 style="margin:0">🏃 Runners <span class="hint" id="campRunCount"></span></h2>
+        <button class="btn ghost" id="campPrepBtn" type="button">🎲 GM prep note</button></div>
+      <div id="campPrep"></div>
+      <div class="runners" id="campRunners"></div>
     </div>
     <div class="camp">
       <div>
@@ -408,6 +420,31 @@
       </div>
     </div>
 
+    <div class="card">
+      <h2>🎲 Game night</h2>
+      <p class="hint" style="margin-top:0">A few hours before game night, Note Tiger privately messages whoever has the GM role a prep note: where you left off, threads to pull, who might show up, things the players may have forgotten, and a few hook ideas. The GM can also get it any time with <code>/campaign prep</code>.</p>
+      <label class="switch"><input type="checkbox" id="PREP_ENABLED"> Send the GM a prep note before game night</label>
+      <div class="row" style="margin-top:10px">
+        <div><label for="GAME_DAY">Day</label><select id="GAME_DAY" style="width:auto">
+          <option value="">Not set</option><option value="0">Sunday</option><option value="1">Monday</option><option value="2">Tuesday</option><option value="3">Wednesday</option><option value="4">Thursday</option><option value="5">Friday</option><option value="6">Saturday</option></select></div>
+        <div><label for="GAME_TIME">Start time</label><input type="time" id="GAME_TIME" style="width:auto"></div>
+        <div><label for="PREP_HOURS">Hours before</label><input type="number" id="PREP_HOURS" min="1" max="72" style="width:90px"></div>
+      </div>
+      <div class="hint">Uses this computer's clock, and Note Tiger has to be running then. The GM needs to allow direct messages from server members.</div>
+      <div class="row" style="margin-top:12px"><button class="btn ghost" type="button" onclick="showTab('campaign');setTimeout(() => $('#campPrepBtn').click(), 300)">Preview the prep note</button></div>
+    </div>
+
+    <div class="card">
+      <h2>✨ Updates</h2>
+      <p class="hint" style="margin-top:0" id="updVersion"></p>
+      <label class="switch"><input type="checkbox" id="UPDATE_CHECK"> Check for new versions automatically</label>
+      <div class="row" style="margin-top:12px">
+        <button class="btn ghost" id="updCheck" type="button">Check now</button>
+        <button class="btn" id="updInstall" type="button" hidden>Update now</button>
+        <span class="hint" id="updHint"></span>
+      </div>
+    </div>
+
     <div class="row"><button class="btn" id="saveBtn">Save &amp; restart bot</button><span class="hint" id="saveHint"></span></div>
   </section>
 </main>
@@ -556,6 +593,21 @@ function renderHome() {
   for (const g of rec) {
     banners += `<div class="banner err">🔴 Recording <b>${esc(g.recording.title)}</b> in ${esc(g.name)}: ${g.recording.minutes} min, ${g.recording.lines} lines transcribed${g.recording.pending ? `, ${g.recording.pending} in progress` : ''}.</div>`;
   }
+  const up = s.update;
+  if (up?.download?.state === 'downloading') {
+    const pct = up.download.total ? Math.round((up.download.got / up.download.total) * 100) : 0;
+    banners += `<div class="banner ok">⬇️ Downloading Note Tiger ${esc(up.latest)}: <b>${pct}%</b>
+      <div style="height:8px;background:var(--bg);border-radius:99px;overflow:hidden;margin-top:8px"><div style="height:100%;width:${Math.max(2, pct)}%;background:var(--green)"></div></div></div>`;
+  } else if (up?.download?.state === 'starting') {
+    banners += `<div class="banner ok">🔄 Installing Note Tiger ${esc(up.latest)}. This window closes and Note Tiger starts again in about a minute.</div>`;
+  } else if (up?.download?.state === 'failed') {
+    banners += `<div class="banner err">The update failed: ${esc(up.download.error)}. <a href="#" onclick="installUpdate(event)">Try again</a></div>`;
+  } else if (up?.newer) {
+    banners += `<div class="banner ok"><b>✨ Note Tiger ${esc(up.latest)} is out</b> (you have ${esc(up.current)}).
+      ${up.canInstall ? '<button class="btn" style="margin-left:10px" onclick="installUpdate(event)">Update now</button>' : ''}
+      <a href="${esc(up.url)}" target="_blank" style="color:inherit;margin-left:10px">What's new</a>
+      <div class="hint" style="color:inherit;opacity:.8;margin-top:4px">Your settings, sessions and rulebooks are kept. Note Tiger closes and reopens by itself.</div></div>`;
+  }
   $('#homeBanners').innerHTML = banners;
 
   const totalSessions = s.guilds.reduce((n, g) => n + g.sessions, 0);
@@ -617,6 +669,15 @@ function renderCampaign() {
       <div class="row" style="gap:6px;margin-top:6px"><button class="mini" data-act="npc-edit">Edit</button><button class="mini" data-act="npc-delete">Remove</button></div>
     </details>`).join('')
     : `<div class="empty">${camp.contacts.length ? 'Nobody matches that search.' : 'No contacts yet. They\'re picked up when a recap is written (or rewritten).'}</div>`;
+  $('#campRunCount').textContent = `(${camp.runners.length})`;
+  $('#campRunners').innerHTML = camp.runners.length ? camp.runners.map((r) => `<div class="runner" style="border-top-color:${r.color || 'var(--accent2)'}">
+      <div class="rn" style="color:${r.color || 'var(--text)'}">${esc(r.name)}</div>
+      <div class="hint">${r.player ? `Played by ${esc(r.player)} · ` : ''}${r.sessions.length} session${r.sessions.length === 1 ? '' : 's'} since ${esc(r.first?.title || '?')}</div>
+      ${r.status ? `<div style="margin-top:6px">Right now: <b>${esc(r.status)}</b></div>` : ''}
+      ${r.sessions.some((x) => x.moment) ? `<div style="margin-top:8px"><b>⭐ Big moments</b><ul>${r.sessions.filter((x) => x.moment).slice(-4).map((x) => `<li>${esc(x.moment)} <span class="hint">(${esc(x.title)})</span></li>`).join('')}</ul></div>` : ''}
+      <details><summary class="hint" style="cursor:pointer">Session by session</summary><ul>${r.sessions.map((x) => `<li><i>${esc(x.date)}:</i> ${esc(x.did)}${x.talkPct != null ? ` <span class="hint">🔦 ${x.talkPct}%</span>` : ''}</li>`).join('')}</ul></details>
+      ${r.gear.length ? `<div class="gear">${r.gear.slice(-14).map((g) => `<span>${esc(g)}</span>`).join('')}</div>` : ''}
+    </div>`).join('') : '<div class="hint">No runner profiles yet. They\'re built from each recap (players set their runner name with <code>/character</code>).</div>';
   $('#campPlaceCount').textContent = `(${camp.places.length})`;
   $('#campPlaces').innerHTML = camp.places.length ? camp.places.map((c) => `<details class="npc" data-pkey="${esc(c.key)}">
       <summary><b>${esc(c.name)}</b>${c.what ? `<span class="hint" style="margin:0">${esc(c.what)}</span>` : ''}</summary>
@@ -646,6 +707,19 @@ function renderCampaign() {
 $('#campGuild').addEventListener('change', loadCampaign);
 $('#campNpcQ').addEventListener('input', () => camp && renderCampaign());
 $('#campQuoteQ').addEventListener('input', () => camp && renderCampaign());
+$('#campPrepBtn').addEventListener('click', async (e) => {
+  const gid = $('#campGuild').value; if (!gid) return;
+  e.target.disabled = true; $('#campPrep').innerHTML = '<div class="answer">Writing the prep note… (the local AI can take a minute)</div>';
+  try {
+    const r = await api(`/api/campaign/${gid}/prep`, { method: 'POST', body: {} });
+    $('#campPrep').innerHTML = r.note ? `<div class="recap answer">${mdLite(r.note)}</div>` : '<div class="answer">Nothing to prep from yet: record a session first.</div>';
+  } catch (err) { $('#campPrep').innerHTML = ''; toast(err.message); }
+  e.target.disabled = false;
+});
+function mdLite(t) {
+  return esc(t).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>').replace(/(^|[^*])\*(?!\s)(.+?)\*/g, '$1<i>$2</i>');
+}
+
 $('#campPlaceAdd').addEventListener('click', async () => {
   const name = $('#campPlaceName').value.trim(); if (!name) return;
   await campEdit({ type: 'place-add', name, what: $('#campPlaceWhat').value.trim() });
@@ -738,6 +812,30 @@ $('#restoreBtn').addEventListener('click', async (e) => {
   } catch (err) { $('#backupHint').innerHTML = `<span style="color:var(--red)">${esc(err.message)}</span>`; }
   e.target.disabled = false;
 });
+
+// ---------- updates ----------
+async function installUpdate(e) {
+  e?.preventDefault?.();
+  if (status?.guilds?.some((g) => g.recording)) { toast('A session is recording. Update after you stop it.'); return; }
+  if (!confirm(`Update to Note Tiger ${status?.update?.latest}? The bot stops, Note Tiger closes, updates, and opens again in about a minute.`)) return;
+  try { await api('/api/update/install', { method: 'POST', body: {} }); toast('Downloading the update…'); refreshStatus(); }
+  catch (err) { toast(err.message); }
+}
+function showUpdateStatus() {
+  const u = status?.update; if (!u) return;
+  $('#updVersion').textContent = `You have Note Tiger ${status.version || u.current}.`;
+  $('#updHint').innerHTML = u.error ? esc(u.error)
+    : u.newer ? `<b style="color:var(--green)">${esc(u.latest)} is available.</b> <a href="${esc(u.url)}" target="_blank" style="color:var(--accent2)">What's new</a>`
+    : u.checkedAt ? `Up to date (checked ${esc(new Date(u.checkedAt).toLocaleString())}).` : '';
+  $('#updInstall').hidden = !(u.newer && u.canInstall);
+}
+$('#updCheck').addEventListener('click', async (e) => {
+  e.target.disabled = true;
+  try { status.update = await api('/api/update/check', { method: 'POST', body: {} }); showUpdateStatus(); }
+  catch (err) { toast(err.message); }
+  e.target.disabled = false;
+});
+$('#updInstall').addEventListener('click', installUpdate);
 
 // ---------- activity log ----------
 let logOpen = false;
@@ -1024,6 +1122,12 @@ async function loadSettings() {
   $('#backupBox').hidden = !$('#BACKUP_ENABLED').checked;
   showBackupStatus();
   loadVocab();
+  $('#PREP_ENABLED').checked = s.PREP_ENABLED === 'true';
+  $('#GAME_DAY').value = s.GAME_DAY ?? '';
+  $('#GAME_TIME').value = s.GAME_TIME || '19:00';
+  $('#PREP_HOURS').value = s.PREP_HOURS || 3;
+  $('#UPDATE_CHECK').checked = s.UPDATE_CHECK !== 'false';
+  showUpdateStatus();
   const url = status?.site?.url;
   $('#siteHint').innerHTML = url && status.site.configured ? `Site: <a href="${esc(url)}" target="_blank" style="color:var(--accent2)">${esc(url)}</a>` : '';
   const w = $('#WHISPER_MODEL');
@@ -1051,6 +1155,11 @@ $('#saveBtn').addEventListener('click', async () => {
     BACKUP_ENABLED: $('#BACKUP_ENABLED').checked ? 'true' : 'false',
     BACKUP_REPO: $('#BACKUP_REPO').value.trim(),
     BACKUP_TOKEN: $('#BACKUP_TOKEN').value.trim(),
+    PREP_ENABLED: $('#PREP_ENABLED').checked ? 'true' : 'false',
+    GAME_DAY: $('#GAME_DAY').value,
+    GAME_TIME: $('#GAME_TIME').value || '19:00',
+    PREP_HOURS: String(Math.max(1, Math.min(72, Number($('#PREP_HOURS').value) || 3))),
+    UPDATE_CHECK: $('#UPDATE_CHECK').checked ? 'true' : 'false',
     LOG_CHANNEL: $('#LOG_CHANNEL').value.replace(/^#/, '').trim() || 'logs',
     RECAP_CHANNEL: $('#RECAP_CHANNEL').value.replace(/^#/, '').trim() || 'recaps',
     GM_ROLE: $('#GM_ROLE').value.trim() || 'Game Master, GM, Storyteller, DM',
