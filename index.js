@@ -269,20 +269,19 @@ async function stopSession(guild, channel, reason) {
   const files = writeTranscriptFiles(rec.dir, guild.id);
   // Discord shows .html files as code, so only the plain text goes to Discord; the color-coded page
   // (transcript.html) is available from "Download transcript" in the Note Tiger window.
-  const attachments = () => [new AttachmentBuilder(files.txt, { name: `transcript-${rec.meta.date}.txt` })];
+  const attachments = () => transcriptAttachments(files.txt, `transcript-${rec.meta.date}`, rec.meta.title);
   const tips = [];
 
   let logPosted = null;
   if (logChannel) {
     try {
       const st = sessionStats(rec.dir);
-      await logChannel.send({
-        content: `📜 **Transcript: ${rec.meta.title}** (${rec.meta.date}) · ${lines.length} lines` +
+      await sendWithFiles(logChannel,
+        `📜 **Transcript: ${rec.meta.title}** (${rec.meta.date}) · ${lines.length} lines` +
           (st ? ` · 🎲 ${st.gamePct}% game · 🐿️ ${st.squirrelPct}% squirrels` : ''),
-        files: attachments(),
-      });
+        attachments());
       logPosted = logChannel;
-      await postColorLog(logChannel, guild.id, rec.dir).catch((err) => console.error('[logs] color log:', err.message));
+      await postColorLog(logChannel, guild.id, rec.dir, rec.meta.title).catch((err) => console.error('[logs] color log:', err.message));
     } catch (err) {
       console.error(`[logs] couldn't post in #${logChannel.name}:`, err.message);
       tips.push(`I couldn't post in <#${logChannel.id}>. Check that I can send messages and attach files there.`);
@@ -294,7 +293,8 @@ async function stopSession(guild, channel, reason) {
   let recapPosted = null;
   if (recap) {
     const pointer = logPosted ? `\n\n*Full transcript in <#${logPosted.id}>.*` : '';
-    const recapFiles = logPosted ? [] : attachments();
+    const allFiles = logPosted ? [] : attachments();
+    const recapFiles = allFiles.slice(0, 1);
     const meter = statsText(sessionStats(rec.dir));
     const text = `# ${rec.meta.title} — ${rec.meta.date}\n${recap}${meter ? `\n\n${meter}` : ''}${pointer}`;
     if (recapChannel) {
@@ -307,8 +307,9 @@ async function stopSession(guild, channel, reason) {
       tips.push(`Create a text channel called **#${RECAP_CHANNEL}** and I'll post recaps there.`);
     }
     if (!recapPosted) { await sendLong(channel, text, recapFiles); recapPosted = channel; }
+    for (const f of allFiles.slice(1)) await recapPosted.send({ content: f.partLabel, files: [f] });
   } else if (!logPosted) {
-    await channel.send({ files: attachments() });
+    await sendWithFiles(channel, `📜 Transcript: ${rec.meta.title}`, attachments());
   }
 
   // Short note where the command was used, so people know where to look.
@@ -320,7 +321,7 @@ async function stopSession(guild, channel, reason) {
 }
 
 // The conversation as color-coded blocks: one pastel color per person, grouped by who's talking.
-async function postColorLog(logChannel, gid, dir) {
+async function postColorLog(logChannel, gid, dir, title = 'Session') {
   const entries = transcriptEntries(sessionLines(dir), readJSON(path.join(dir, 'notes.json'), []), readLabels(dir));
   if (!entries.length) return;
   const colors = speakerColors(gid, entries.filter((e) => e.kind === 'say').map((e) => e.speaker));
@@ -338,21 +339,61 @@ async function postColorLog(logChannel, gid, dir) {
     else groups.push({ name, text: line, color: e.kind === 'note' ? '#C8CCD4' : colors[baseName(e.speaker)] });
   }
 
-  // Discord allows 10 embeds and 6000 characters per message.
+  // Discord allows 10 embeds and 6000 characters per message, so long sessions are posted in numbered parts.
   const messages = [];
   let cur = [], size = 0;
   for (const g of groups) {
     const len = g.name.length + g.text.length;
-    if (cur.length && (cur.length === 10 || size + len > 5800)) { messages.push(cur); cur = []; size = 0; }
+    if (cur.length && (cur.length === 10 || size + len > 5600)) { messages.push(cur); cur = []; size = 0; }
     cur.push(new EmbedBuilder().setAuthor({ name: g.name.slice(0, 250) }).setDescription(g.text.slice(0, 4000)).setColor(hex(g.color)));
     size += len;
   }
   if (cur.length) messages.push(cur);
-  if (messages.length > 150) {
-    await logChannel.send('*This session is too long to show color-coded here. The full transcript is in the file above.*');
+  const total = messages.length;
+  if (total > 40) {
+    // Would flood the channel (a long session can be 250+ messages): the text parts above have everything.
+    await logChannel.send(`🎨 *The color-coded version of this session is too long for Discord. Open it from **Sessions → Download transcript** in Note Tiger.*`);
     return;
   }
-  for (const embeds of messages) await logChannel.send({ embeds });
+  console.log(`[logs] posting the color-coded transcript in ${total} part${total === 1 ? '' : 's'}`);
+  for (let i = 0; i < total; i++) {
+    await logChannel.send({
+      content: total > 1 ? `📜 **${title}** — part ${i + 1} of ${total}` : `📜 **${title}**`,
+      embeds: messages[i],
+    });
+  }
+  if (total > 1) await logChannel.send(`✅ End of **${title}** (${total} parts).`);
+}
+
+// Sends files one per message when there are several parts (Discord limits upload size per message).
+async function sendWithFiles(channel, content, files) {
+  if (files.length <= 1) return channel.send({ content, files });
+  await channel.send(content);
+  for (const f of files) await channel.send({ content: f.partLabel, files: [f] });
+}
+
+// Discord only previews the first ~50 KB of a text file, so long transcripts are split into parts that each
+// show in full: "Session 1 — part 1 of 5".
+const PART_BYTES = 45_000;
+function transcriptAttachments(file, baseName, title = 'Session') {
+  const text = fs.readFileSync(file, 'utf8');
+  if (Buffer.byteLength(text) <= PART_BYTES) return [new AttachmentBuilder(file, { name: `${baseName}.txt` })];
+  const parts = [];
+  let cur = '', bytes = 0;
+  for (const l of text.split('\n')) {
+    const b = Buffer.byteLength(l) + 1;
+    if (cur && bytes + b > PART_BYTES - 200) { parts.push(cur); cur = ''; bytes = 0; }
+    cur += l + '\n';
+    bytes += b;
+  }
+  if (cur.trim()) parts.push(cur);
+  return parts.map((p, i) => {
+    const file = new AttachmentBuilder(Buffer.from(`${title} — part ${i + 1} of ${parts.length}\n\n${p}`), {
+      name: `${baseName}-part${i + 1}of${parts.length}.txt`,
+    });
+    file.partLabel = `📄 **${title}** — part ${i + 1} of ${parts.length}`;
+    return file;
+  });
 }
 
 // A text channel by name (from Settings), if the bot can see it.
