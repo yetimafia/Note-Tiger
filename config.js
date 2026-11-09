@@ -22,6 +22,8 @@ export const PANEL_PORT = Number(e.PANEL_PORT || 3080);
 export const AUTO_START = e.AUTO_START !== 'false';
 // Tag off-topic table talk so it stays out of the recap (but can still make Best Lines).
 export const SEPARATE_TABLE_TALK = e.SEPARATE_TABLE_TALK !== 'false';
+// Leave the group's "last time on..." recap at the start of a session out of the new recap.
+export const SKIP_OPENING_RECAP = e.SKIP_OPENING_RECAP !== 'false';
 // Text channels for the recap and the full transcript (if a channel doesn't exist, the bot posts
 // where /session stop was used instead).
 const channelName = (v, fallback) => (v ?? fallback).replace(/^#/, '').trim().toLowerCase();

@@ -62,6 +62,7 @@ Download this repo (green **Code** button → **Download ZIP**), unzip it **outs
 | `/session start title:The Renraku Job` | The bot joins your voice channel and starts transcribing. It posts a 🔴 notice. |
 | `/character name:Ghost` | Each player runs this once, so recaps use runner names. |
 | *(GM role)* | Give your game master a Discord role called **Game Master** (or GM / Storyteller / DM). Their lines show who they're voicing, e.g. `Seth (GM as Mr. Johnson)`. |
+| `/session begin` | Done recapping last session? The GM types this when play starts, so the recap chat stays out of the new notes. (Without it, the AI finds the end of your opening recap on its own.) |
 | `/note text:Ghost owes Twitch a favor` | Adds something from text chat to the session. |
 | `/session stop` | A minute or two later, posts the recap in **#recaps** and the full transcript in **#logs**. Create those two text channels (or pick other names in Settings); if they don't exist, both go to the channel you typed in. |
 | `/ask question:Who was the decker in Redmond?` | Answers from all recorded sessions. |

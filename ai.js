@@ -4,9 +4,11 @@ import path from 'node:path';
 import Anthropic from '@anthropic-ai/sdk';
 import {
   USE_CLAUDE, ANTHROPIC_API_KEY, CLAUDE_MODEL, OLLAMA_URL, OLLAMA_MODEL, OLLAMA_CONTEXT, CAMPAIGN_NAME, SEPARATE_TABLE_TALK,
+  SKIP_OPENING_RECAP,
 } from './config.js';
 import {
   listSessions, readJSON, formatTranscript, sessionLines, readLabels, updateLabels, lineKey, writeTranscriptFiles,
+  previousRecap,
 } from './store.js';
 
 const anthropic = USE_CLAUDE ? new Anthropic({ apiKey: ANTHROPIC_API_KEY }) : null;
@@ -127,6 +129,54 @@ export async function classifyTableTalk(dir, { force = false } = {}) {
   return offTopic;
 }
 
+// ---------- the opening "previously on..." recap ----------
+const OPENING_RECAP_SYSTEM = `You look at the START of a speech-to-text transcript of a Shadowrun tabletop RPG session.
+Groups often begin by recapping the PREVIOUS session: people retell what happened last time ("last time we...",
+"so we got the job from...", "remember when..."). Then the new session's play begins (the GM sets a new scene,
+players act, dice get rolled).
+
+Each line starts with an id like L12. Find where the opening recap of the previous session ENDS.
+Answer with JSON only: {"recapEndsAt": id_of_the_last_recap_line} or {"recapEndsAt": null} if the session
+doesn't start with a recap of the previous one. Small talk before the recap counts as part of it.
+Only the opening counts: never mark lines after new play has clearly started.`;
+
+// Finds the opening recap; saves its lines in labels.json (recapLines).
+// If the GM used /session begin, everything before that moment is the recap, no guessing needed.
+export async function detectOpeningRecap(dir, { prevRecap = null, force = false } = {}) {
+  const lines = sessionLines(dir);
+  const meta = readJSON(path.join(dir, 'meta.json'), {});
+  const saved = readJSON(path.join(dir, 'labels.json'), {});
+  if (meta.playStartedAt) {
+    const recap = lines.filter((l) => l.t < meta.playStartedAt).map(lineKey);
+    updateLabels(dir, { recapLines: recap, recapLineCount: lines.length, recapSource: 'marker' });
+    return new Set(recap);
+  }
+  if (!force && saved.recapLines && saved.recapLineCount === lines.length) return new Set(saved.recapLines);
+  if (!SKIP_OPENING_RECAP || lines.length < 5) { updateLabels(dir, { recapLines: [], recapLineCount: lines.length }); return new Set(); }
+
+  // Only the first ~40 minutes (and at most 300 lines) can be the opening recap.
+  const cutoff = lines[0].t + 40 * 60_000;
+  let n = 0, size = 0;
+  const limit = USE_CLAUDE ? 60_000 : 12_000;
+  while (n < lines.length && n < 300 && lines[n].t <= cutoff && size < limit) { size += lines[n].text.length + 30; n++; }
+  const numbered = lines.slice(0, n).map((l, i) => `L${i} ${l.speaker}: ${l.text}`).join('\n');
+  const context = prevRecap ? `What happened LAST session (for comparison):\n${prevRecap.slice(0, USE_CLAUDE ? 8000 : 2500)}\n\n---\n\n` : '';
+  let end = -1;
+  try {
+    console.log(`[opening recap] checking the first ${n} lines`);
+    const answer = await askAI(OPENING_RECAP_SYSTEM, `${context}START OF THIS SESSION:\n${numbered}`, 300, { json: true });
+    const m = answer.match(/\{[\s\S]*\}/);
+    const v = m ? JSON.parse(m[0]).recapEndsAt : null;
+    if (v !== null && v !== undefined && Number.isFinite(Number(v))) end = Math.min(Number(v), n - 1);
+  } catch (err) {
+    console.error('[opening recap] skipped:', err.message);
+  }
+  const recap = end >= 0 ? lines.slice(0, end + 1).map(lineKey) : [];
+  updateLabels(dir, { recapLines: recap, recapLineCount: lines.length, recapSource: 'ai' });
+  console.log(`[opening recap] ${recap.length ? `first ${recap.length} lines are a recap of last session` : 'none found'}`);
+  return new Set(recap);
+}
+
 // ---------- who the GM is voicing ----------
 const VOICES_SYSTEM = `You help label a speech-to-text transcript of a Shadowrun tabletop RPG session.
 Each line starts with an id like L12. Lines marked [GM] are spoken by the game master (storyteller).
@@ -223,22 +273,24 @@ async function writeRecap(title, date, gameText, tableText, prevRecap) {
 }
 
 // Tags table talk, writes transcript.txt and recap.md for a session folder, and returns the recap.
-export async function recapSession(dir, { prevRecap = null, reclassify = false } = {}) {
+export async function recapSession(dir, { prevRecap = previousRecap(dir), reclassify = false } = {}) {
   const meta = readJSON(path.join(dir, 'meta.json'), {});
   const lines = sessionLines(dir);
   const notes = readJSON(path.join(dir, 'notes.json'), []);
   if (lines.length === 0 && notes.length === 0) throw new Error('That session has no transcript.');
   const offTopic = await classifyTableTalk(dir, { force: reclassify });
-  const voices = await attributeVoices(dir, offTopic, { force: reclassify });
+  const recap = await detectOpeningRecap(dir, { prevRecap, force: reclassify });
+  const voices = await attributeVoices(dir, new Set([...offTopic, ...recap]), { force: reclassify });
+  const labels = { offTopic, voices, recap };
   writeTranscriptFiles(dir);
-  const recap = await writeRecap(
+  const text = await writeRecap(
     meta.title, meta.date,
-    formatTranscript(lines, notes, offTopic, 'game', voices),
-    offTopic.size ? formatTranscript(lines, [], offTopic, 'table', voices) : '',
+    formatTranscript(lines, notes, labels, 'game'),
+    offTopic.size ? formatTranscript(lines, [], labels, 'table') : '',
     prevRecap,
   );
-  fs.writeFileSync(path.join(dir, 'recap.md'), recap);
-  return recap;
+  fs.writeFileSync(path.join(dir, 'recap.md'), text);
+  return text;
 }
 
 export const RECAP_SYSTEM = `You are the campaign scribe for ${CAMPAIGN_NAME}, a Shadowrun tabletop RPG game.
@@ -247,6 +299,8 @@ errors and crosstalk. Speaker labels look like "Player (Runner name)". The game 
 "Name (GM as Narrator)", "Name (GM as <NPC name>)" when voicing a character, or "Name (GM)" when out of character.
 These labels were added by an AI and may occasionally be wrong; use context.
 Off-topic table talk has been separated out; if present it comes after, under TABLE TALK.
+The group's retelling of the previous session at the start has already been removed: only include events from
+THIS session. Don't repeat what the previous session's recap already covered, except briefly for context.
 
 Write a recap the players will enjoy reading and can rely on later. Focus on what happened in the fiction,
 using only the game transcript. Use Discord markdown, and these sections (skip any that have nothing in them):
@@ -282,8 +336,7 @@ export function buildArchive(gid) {
   for (let i = sessions.length - 1; i >= 0; i--) {
     const s = sessions[i];
     // Table talk is left out so questions are answered from what happened in the game.
-    const { offTopic, voices } = readLabels(s.dir);
-    const transcript = formatTranscript(sessionLines(s.dir), readJSON(path.join(s.dir, 'notes.json'), []), offTopic, 'game', voices);
+    const transcript = formatTranscript(sessionLines(s.dir), readJSON(path.join(s.dir, 'notes.json'), []), readLabels(s.dir), 'game');
     const block = `\n\n=== Session ${i + 1}: ${s.title} (${s.date}) — TRANSCRIPT ===\n${transcript}`;
     if (out.length + block.length > ASK_CHAR_BUDGET) break;
     out += block;

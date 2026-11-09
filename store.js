@@ -77,7 +77,11 @@ export const lineKey = (l) => `${l.t}:${l.speaker}`;
 // which lines were off-topic table talk, and who the GM was voicing on each GM line.
 export function readLabels(dir) {
   const l = readJSON(path.join(dir, 'labels.json'), {});
-  return { offTopic: new Set(l.offTopic || []), voices: new Map(Object.entries(l.voices || {})) };
+  return {
+    offTopic: new Set(l.offTopic || []),              // off-topic table talk
+    voices: new Map(Object.entries(l.voices || {})),  // who the GM is voicing
+    recap: new Set(l.recapLines || []),               // the group retelling last session at the start
+  };
 }
 export const readTableTalk = (dir) => readLabels(dir).offTopic;
 export const readVoices = (dir) => readLabels(dir).voices;
@@ -97,23 +101,27 @@ export function displaySpeaker(line, voices = new Map()) {
 const clock = (t) => new Date(t).toTimeString().slice(0, 5);
 
 // Spoken lines + /note entries, in time order, each marked if it's table talk.
-export function transcriptEntries(lines, notes = [], offTopic = new Set(), voices = new Map()) {
+export function transcriptEntries(lines, notes = [], labels = {}) {
+  const { offTopic = new Set(), voices = new Map(), recap = new Set() } = labels;
   return [
     ...lines.map((l) => ({
       t: l.t, kind: 'say', speaker: displaySpeaker(l, voices), text: l.text,
-      offTopic: offTopic.has(lineKey(l)), gm: Boolean(l.gm), voice: voices.get(lineKey(l)) || null,
+      offTopic: offTopic.has(lineKey(l)), recap: recap.has(lineKey(l)) && !offTopic.has(lineKey(l)),
+      gm: Boolean(l.gm), voice: voices.get(lineKey(l)) || null,
     })),
-    ...notes.map((n) => ({ t: n.t, kind: 'note', speaker: n.speaker, text: n.text, offTopic: false })),
+    ...notes.map((n) => ({ t: n.t, kind: 'note', speaker: n.speaker, text: n.text, offTopic: false, recap: false })),
   ].sort((a, b) => a.t - b.t);
 }
 
-// mode: 'all' (table talk marked), 'game' (table talk left out), 'table' (only table talk)
-export function formatTranscript(lines, notes = [], offTopic = new Set(), mode = 'all', voices = new Map()) {
-  return transcriptEntries(lines, notes, offTopic, voices)
-    .filter((e) => (mode === 'game' ? !e.offTopic : mode === 'table' ? e.offTopic : true))
-    .map((e) => (e.kind === 'note'
-      ? `[${clock(e.t)}] NOTE from ${e.speaker}: ${e.text}`
-      : `[${clock(e.t)}] ${mode === 'all' && e.offTopic ? '(table talk) ' : ''}${e.speaker}: ${e.text}`))
+// mode: 'all' (everything, with tags), 'game' (no table talk, no opening recap), 'table' (only table talk)
+export function formatTranscript(lines, notes = [], labels = {}, mode = 'all') {
+  return transcriptEntries(lines, notes, labels)
+    .filter((e) => (mode === 'game' ? !e.offTopic && !e.recap : mode === 'table' ? e.offTopic : true))
+    .map((e) => {
+      if (e.kind === 'note') return `[${clock(e.t)}] NOTE from ${e.speaker}: ${e.text}`;
+      const tag = mode !== 'all' ? '' : e.offTopic ? '(table talk) ' : e.recap ? '(recap of last session) ' : '';
+      return `[${clock(e.t)}] ${tag}${e.speaker}: ${e.text}`;
+    })
     .join('\n');
 }
 
@@ -135,8 +143,8 @@ export function readSession(gid, id) {
   const recapFile = path.join(dir, 'recap.md');
   const lines = sessionLines(dir);
   const notes = readJSON(path.join(dir, 'notes.json'), []);
-  const { offTopic, voices } = readLabels(dir);
-  const entries = transcriptEntries(lines, notes, offTopic, voices);
+  const labels = readLabels(dir);
+  const entries = transcriptEntries(lines, notes, labels);
   const colors = speakerColors(gid, entries.filter((e) => e.kind === 'say').map((e) => e.speaker));
   for (const e of entries) e.color = colors[baseName(e.speaker)] || null;
   return {
@@ -144,9 +152,11 @@ export function readSession(gid, id) {
     id,
     dir,
     recap: fs.existsSync(recapFile) ? fs.readFileSync(recapFile, 'utf8') : null,
-    transcript: formatTranscript(lines, notes, offTopic, 'all', voices),
+    transcript: formatTranscript(lines, notes, labels),
     entries,
-    tableTalkLines: offTopic.size,
+    tableTalkLines: labels.offTopic.size,
+    recapLines: entries.filter((e) => e.recap).length,
+    playStartedAt: meta.playStartedAt ?? null,
   };
 }
 
@@ -159,22 +169,21 @@ export function groupEntries(entries) {
   for (const e of entries) {
     const name = e.kind === 'note' ? `📝 Note from ${e.speaker}` : e.speaker;
     const last = groups.at(-1);
-    if (last && last.name === name && last.offTopic === e.offTopic && last.kind === e.kind) last.lines.push(e);
-    else groups.push({ name, kind: e.kind, offTopic: e.offTopic, voice: e.voice, gm: e.gm, color: e.color, lines: [e] });
+    if (last && last.name === name && last.offTopic === e.offTopic && last.recap === e.recap && last.kind === e.kind) last.lines.push(e);
+    else groups.push({ name, kind: e.kind, offTopic: e.offTopic, recap: e.recap, voice: e.voice, gm: e.gm, color: e.color, lines: [e] });
   }
   return groups;
 }
 
 export function transcriptHtml(gid, dir) {
   const meta = readJSON(path.join(dir, 'meta.json'), {});
-  const { offTopic, voices } = readLabels(dir);
-  const entries = transcriptEntries(sessionLines(dir), readJSON(path.join(dir, 'notes.json'), []), offTopic, voices);
+  const entries = transcriptEntries(sessionLines(dir), readJSON(path.join(dir, 'notes.json'), []), readLabels(dir));
   const colors = speakerColors(gid, entries.filter((e) => e.kind === 'say').map((e) => e.speaker));
   for (const e of entries) e.color = e.kind === 'note' ? '#C8CCD4' : colors[baseName(e.speaker)] || '#C8CCD4';
   const blocks = groupEntries(entries).map((g) => {
-    const tag = g.offTopic ? '<span class="tag">table talk</span>' : '';
+    const tag = g.offTopic ? '<span class="tag">table talk</span>' : g.recap ? '<span class="tag">recap of last session</span>' : '';
     const rows = g.lines.map((e) => `<div class="ln"><span class="tm">${clock(e.t)}</span>${escHtml(e.text)}</div>`).join('');
-    return `<div class="b${g.offTopic ? ' tt' : ''}${g.kind === 'note' ? ' note' : ''}" style="border-left-color:${g.color}">` +
+    return `<div class="b${g.offTopic || g.recap ? ' tt' : ''}${g.kind === 'note' ? ' note' : ''}" style="border-left-color:${g.color}">` +
       `<div class="n" style="color:${g.color}">${escHtml(g.name)}${tag}</div>${rows}</div>`;
   }).join('\n');
   const people = [...new Set(entries.filter((e) => e.kind === 'say').map((e) => baseName(e.speaker)))]
@@ -203,15 +212,26 @@ ${blocks}
 </main></body></html>`;
 }
 
+// The recap of the session before this one (for context), if there is one.
+export function previousRecap(dir) {
+  const gid = path.basename(path.dirname(path.dirname(dir)));
+  const sessions = listSessions(gid);
+  const i = sessions.findIndex((s) => path.resolve(s.dir) === path.resolve(dir));
+  for (let j = (i < 0 ? sessions.length : i) - 1; j >= 0; j--) {
+    const f = path.join(sessions[j].dir, 'recap.md');
+    if (fs.existsSync(f)) return fs.readFileSync(f, 'utf8');
+  }
+  return null;
+}
+
 // data/<server id>/sessions/<session id> -> server id
 export const gidOf = (dir) => path.basename(path.dirname(path.dirname(dir)));
 
 // Writes transcript.txt and transcript.html for a session folder.
 export function writeTranscriptFiles(dir, gid = gidOf(dir)) {
-  const { offTopic, voices } = readLabels(dir);
   const txt = path.join(dir, 'transcript.txt');
   const html = path.join(dir, 'transcript.html');
-  fs.writeFileSync(txt, formatTranscript(sessionLines(dir), readJSON(path.join(dir, 'notes.json'), []), offTopic, 'all', voices));
+  fs.writeFileSync(txt, formatTranscript(sessionLines(dir), readJSON(path.join(dir, 'notes.json'), []), readLabels(dir)));
   fs.writeFileSync(html, transcriptHtml(gid, dir));
   return { txt, html };
 }

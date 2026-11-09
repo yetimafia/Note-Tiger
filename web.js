@@ -20,6 +20,7 @@ export const SETTINGS = [
   { key: 'LOG_CHANNEL' },
   { key: 'RECAP_CHANNEL' },
   { key: 'GM_ROLE' },
+  { key: 'SKIP_OPENING_RECAP' },
 ];
 
 function readEnvLines() {

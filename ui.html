@@ -92,7 +92,8 @@
   .tblock .tl { padding: 1px 0; line-height: 1.45; }
   .tblock .tm { font: 12px ui-monospace, Consolas, monospace; background: var(--bg); color: var(--dim); border-radius: 4px; padding: 1px 5px; margin-right: 8px; }
   .tblock.tt { opacity: .6; }
-  .tblock.tt .tl { font-style: italic; }
+  .tblock.tt .tl, .tblock.rc .tl { font-style: italic; }
+  .tblock.rc { opacity: .6; }
   .tblock.note { background: #1a1e27; }
   .tag.tt { background: var(--bg); color: var(--dim); border: 1px solid var(--line); }
   .tview.hide-tt .tblock.tt { display: none; }
@@ -145,6 +146,7 @@
         <li>Join a voice channel, then type <code>/session start title:Your title</code> in a text channel.</li>
         <li>Players: <code>/character name:RunnerName</code> once, so recaps use runner names.</li>
         <li>GM: have the <b>Game Master</b> role in Discord, so narration and NPC voices are labeled.</li>
+        <li>Recapping last session first? GM types <code>/session begin</code> when play starts.</li>
         <li><code>/note text:…</code> adds anything important said in text chat.</li>
         <li><code>/session stop</code> at the end. The recap posts in <b>#recaps</b> a minute or two later, the full transcript in <b>#logs</b>, and both show up here under Sessions.</li>
         <li><code>/ask question:…</code> in Discord, or use the Ask tab here.</li>
@@ -227,6 +229,12 @@
       <h2>Table talk</h2>
       <label class="switch"><input type="checkbox" id="SEPARATE_TABLE_TALK"> Keep off-topic chatter out of the recap</label>
       <div class="hint">The AI tags conversation that isn't about the game (real life, other games, food…). It stays in the transcript, dimmed, and can still make <b>Best Lines</b>, but the recap and questions only use the game.</div>
+    </div>
+
+    <div class="card">
+      <h2>Opening recap</h2>
+      <label class="switch"><input type="checkbox" id="SKIP_OPENING_RECAP"> Leave our "last time on…" recap out of the new notes</label>
+      <div class="hint">If you start by recapping last session, the AI finds where that ends and keeps it out of the new recap (it stays in the transcript, tagged). Most reliable: the GM types <code>/session begin</code> when play starts.</div>
     </div>
 
     <div class="card">
@@ -463,7 +471,7 @@ async function openSession(id, view = 'recap') {
   const dur = s.endedAt ? Math.round((new Date(s.endedAt) - new Date(s.startedAt)) / 60000) : null;
   $('#sessView').innerHTML = `
     <h1>${esc(s.title)}</h1>
-    <div class="hint">${esc(s.date)}${s.voiceChannel ? ` · ${esc(s.voiceChannel)}` : ''}${dur != null ? ` · ${Math.floor(dur / 60)}h ${dur % 60}m` : ''}${s.tableTalkLines ? ` · ${s.tableTalkLines} line${s.tableTalkLines === 1 ? '' : 's'} of table talk kept out of the recap` : ''}</div>
+    <div class="hint">${esc(s.date)}${s.voiceChannel ? ` · ${esc(s.voiceChannel)}` : ''}${dur != null ? ` · ${Math.floor(dur / 60)}h ${dur % 60}m` : ''}${s.tableTalkLines ? ` · ${s.tableTalkLines} line${s.tableTalkLines === 1 ? '' : 's'} of table talk kept out of the recap` : ''}${s.recapLines ? ` · opening recap of last session (${s.recapLines} line${s.recapLines === 1 ? '' : 's'}) left out` : ''}</div>
     <div class="tabs2">
       <button class="btn ${view === 'recap' ? '' : 'ghost'}" data-v="recap">Recap</button>
       <button class="btn ${view === 'transcript' ? '' : 'ghost'}" data-v="transcript">Transcript</button>
@@ -505,11 +513,11 @@ function renderTranscript(s) {
   for (const e of s.entries) {
     const name = e.kind === 'note' ? `📝 Note from ${e.speaker}` : e.speaker;
     const last = groups.at(-1);
-    if (last && last.name === name && last.offTopic === e.offTopic && last.kind === e.kind) last.lines.push(e);
-    else groups.push({ name, kind: e.kind, offTopic: e.offTopic, color: e.kind === 'note' ? '#C8CCD4' : (e.color || '#C8CCD4'), lines: [e] });
+    if (last && last.name === name && last.offTopic === e.offTopic && last.recap === e.recap && last.kind === e.kind) last.lines.push(e);
+    else groups.push({ name, kind: e.kind, offTopic: e.offTopic, recap: e.recap, color: e.kind === 'note' ? '#C8CCD4' : (e.color || '#C8CCD4'), lines: [e] });
   }
-  const blocks = groups.map((g) => `<div class="tblock ${g.offTopic ? 'tt' : ''} ${g.kind === 'note' ? 'note' : ''}" style="border-left-color:${g.color}">
-      <div class="tname" style="color:${g.color}">${esc(g.name)}${g.offTopic ? '<span class="tag tt" style="margin-left:8px">table talk</span>' : ''}</div>
+  const blocks = groups.map((g) => `<div class="tblock ${g.offTopic ? 'tt' : ''} ${g.recap ? 'rc' : ''} ${g.kind === 'note' ? 'note' : ''}" style="border-left-color:${g.color}">
+      <div class="tname" style="color:${g.color}">${esc(g.name)}${g.offTopic ? '<span class="tag tt" style="margin-left:8px">table talk</span>' : g.recap ? '<span class="tag tt" style="margin-left:8px">recap of last session</span>' : ''}</div>
       ${g.lines.map((e) => `<div class="tl"><span class="tm">${clock(e.t)}</span>${esc(e.text)}</div>`).join('')}</div>`).join('');
   const toggle = s.tableTalkLines
     ? `<label class="switch" style="margin-bottom:10px"><input type="checkbox" id="ttToggle" ${showTableTalk ? 'checked' : ''}> Show table talk (${s.tableTalkLines} line${s.tableTalkLines === 1 ? '' : 's'}, dimmed)</label>`
@@ -550,6 +558,7 @@ async function loadSettings() {
   $('#RECAP_CHANNEL').value = s.RECAP_CHANNEL || 'recaps';
   $('#GM_ROLE').value = s.GM_ROLE || 'Game Master, GM, Storyteller, DM';
   $('#SEPARATE_TABLE_TALK').checked = s.SEPARATE_TABLE_TALK !== 'false';
+  $('#SKIP_OPENING_RECAP').checked = s.SKIP_OPENING_RECAP !== 'false';
   const w = $('#WHISPER_MODEL');
   if (s.WHISPER_MODEL && ![...w.options].some((o) => o.value === s.WHISPER_MODEL)) w.add(new Option(s.WHISPER_MODEL, s.WHISPER_MODEL));
   w.value = s.WHISPER_MODEL || 'onnx-community/whisper-small.en';
@@ -566,6 +575,7 @@ $('#saveBtn').addEventListener('click', async () => {
     OLLAMA_MODEL: $('#OLLAMA_MODEL').value,
     WHISPER_MODEL: $('#WHISPER_MODEL').value,
     SEPARATE_TABLE_TALK: $('#SEPARATE_TABLE_TALK').checked ? 'true' : 'false',
+    SKIP_OPENING_RECAP: $('#SKIP_OPENING_RECAP').checked ? 'true' : 'false',
     LOG_CHANNEL: $('#LOG_CHANNEL').value.replace(/^#/, '').trim() || 'logs',
     RECAP_CHANNEL: $('#RECAP_CHANNEL').value.replace(/^#/, '').trim() || 'recaps',
     GM_ROLE: $('#GM_ROLE').value.trim() || 'Game Master, GM, Storyteller, DM',

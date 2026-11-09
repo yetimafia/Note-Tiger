@@ -221,8 +221,9 @@ async function startSession(interaction) {
   const gmNote = gms.length
     ? `🎲 Game master: **${gms.join(', ')}**. I'll note who they're voicing (narrator or NPC) in the transcript.\n`
     : `🎲 No game master found. Give the GM a role called **${GM_ROLES[0].replace(/\b\w/g, (c) => c.toUpperCase())}** so I can tell narration and NPCs apart.\n`;
+  const beginNote = '📖 Recapping last session first? Type `/session begin` when the game starts, so the recap stays out of the new notes.\n';
   await interaction.editReply(
-    `🔴 **Recording "${title}"** in **${voice.name}**.\n` + gmNote +
+    `🔴 **Recording "${title}"** in **${voice.name}**.\n` + gmNote + beginNote +
     'Everyone in the channel is being transcribed for the session recap. ' +
     'Don\'t want to be recorded? Use `/optout on`. Stop with `/session stop`.',
   );
@@ -318,8 +319,7 @@ async function stopSession(guild, channel, reason) {
 
 // The conversation as color-coded blocks: one pastel color per person, grouped by who's talking.
 async function postColorLog(logChannel, gid, dir) {
-  const { offTopic, voices } = readLabels(dir);
-  const entries = transcriptEntries(sessionLines(dir), readJSON(path.join(dir, 'notes.json'), []), offTopic, voices);
+  const entries = transcriptEntries(sessionLines(dir), readJSON(path.join(dir, 'notes.json'), []), readLabels(dir));
   if (!entries.length) return;
   const colors = speakerColors(gid, entries.filter((e) => e.kind === 'say').map((e) => e.speaker));
   const clock = (t) => new Date(t).toTimeString().slice(0, 5);
@@ -328,8 +328,9 @@ async function postColorLog(logChannel, gid, dir) {
   // Group consecutive lines from the same speaker (and same voice / table-talk state).
   const groups = [];
   for (const e of entries) {
-    const name = e.kind === 'note' ? `📝 Note from ${e.speaker}` : e.offTopic ? `${e.speaker} · table talk` : e.speaker;
-    const line = `\`${clock(e.t)}\` ${e.offTopic ? `*${e.text}*` : e.text}`;
+    const name = e.kind === 'note' ? `📝 Note from ${e.speaker}`
+      : e.offTopic ? `${e.speaker} · table talk` : e.recap ? `${e.speaker} · recap of last session` : e.speaker;
+    const line = `\`${clock(e.t)}\` ${e.offTopic || e.recap ? `*${e.text}*` : e.text}`;
     const last = groups.at(-1);
     if (last && last.name === name && last.text.length + line.length < 3800) last.text += `\n${line}`;
     else groups.push({ name, text: line, color: e.kind === 'note' ? '#C8CCD4' : colors[baseName(e.speaker)] });
@@ -366,6 +367,7 @@ const commands = [
     .addSubcommand((s) => s.setName('start').setDescription('Join your voice channel and start listening')
       .addStringOption((o) => o.setName('title').setDescription('e.g. "The Renraku Extraction"')))
     .addSubcommand((s) => s.setName('stop').setDescription('Stop recording and post the recap'))
+    .addSubcommand((s) => s.setName('begin').setDescription('The recap of last session is done: the game starts now'))
     .addSubcommand((s) => s.setName('status').setDescription('Show recording status')),
   new SlashCommandBuilder().setName('note').setDescription('Add a note to the current session')
     .addStringOption((o) => o.setName('text').setDescription('The note').setRequired(true)),
@@ -409,6 +411,13 @@ client.on('interactionCreate', async (interaction) => {
         if (!live.has(gid)) return interaction.reply({ content: 'Nothing is being recorded.', flags: MessageFlags.Ephemeral });
         await interaction.reply('Wrapping up…');
         return await stopSession(guild, interaction.channel);
+      }
+      if (sub === 'begin') {
+        const rec = live.get(gid);
+        if (!rec) return interaction.reply({ content: 'Nothing is being recorded. Start with `/session start`.', flags: MessageFlags.Ephemeral });
+        rec.meta.playStartedAt = Date.now();
+        writeJSON(path.join(rec.dir, 'meta.json'), rec.meta);
+        return interaction.reply('▶️ **Game on!** Everything before this was the recap of last session, so it won\'t go into the new notes.');
       }
       if (sub === 'status') {
         const rec = live.get(gid);
