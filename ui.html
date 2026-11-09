@@ -86,6 +86,12 @@
   .power .grow { flex: 1; min-width: 0; }
   button.btn.big { padding: 13px 26px; font-size: 16px; min-width: 150px; }
   button.btn.stop { background: var(--panel2); color: var(--text); border: 1px solid var(--line); }
+  .meter { background: var(--panel2); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; margin: 12px 0 4px; }
+  .meter .bar { display: flex; height: 14px; border-radius: 99px; overflow: hidden; background: var(--bg); margin: 8px 0; }
+  .meter .bar span { display: block; height: 100%; }
+  .meter .legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 13px; color: var(--dim); }
+  .meter .legend b { color: var(--text); }
+  .meter .legend i { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 5px; }
   .tview { max-height: 62vh; overflow: auto; padding-right: 4px; }
   .tblock { background: var(--panel2); border-left: 4px solid; border-radius: 6px; padding: 8px 14px 10px 12px; margin: 5px 0; font-size: 14px; }
   .tblock .tname { font-weight: 600; margin-bottom: 3px; }
@@ -472,6 +478,7 @@ async function openSession(id, view = 'recap') {
   $('#sessView').innerHTML = `
     <h1>${esc(s.title)}</h1>
     <div class="hint">${esc(s.date)}${s.voiceChannel ? ` · ${esc(s.voiceChannel)}` : ''}${dur != null ? ` · ${Math.floor(dur / 60)}h ${dur % 60}m` : ''}${s.tableTalkLines ? ` · ${s.tableTalkLines} line${s.tableTalkLines === 1 ? '' : 's'} of table talk kept out of the recap` : ''}${s.recapLines ? ` · opening recap of last session (${s.recapLines} line${s.recapLines === 1 ? '' : 's'}) left out` : ''}</div>
+    ${renderMeter(s.stats)}
     <div class="tabs2">
       <button class="btn ${view === 'recap' ? '' : 'ghost'}" data-v="recap">Recap</button>
       <button class="btn ${view === 'transcript' ? '' : 'ghost'}" data-v="transcript">Transcript</button>
@@ -498,6 +505,18 @@ async function openSession(id, view = 'recap') {
     try { await api(`/api/sessions/${gid}/${encodeURIComponent(id)}`, { method: 'DELETE' }); toast('Deleted.'); currentSession = null; loadSessions(); }
     catch (err) { toast(err.message); }
   };
+}
+
+function fmtDur(ms) { const m = Math.round(ms / 60000); return m >= 60 ? `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, '0')}m` : `${m}m`; }
+function renderMeter(st) {
+  if (!st) return '';
+  const parts = [['#7bd88f', 'Playing the game', st.gameMs, st.gamePct], ['#f5a524', 'Squirrels', st.squirrelMs, st.squirrelPct],
+    ['#9be7ef', 'Recap of last session', st.recapMs, st.recapPct], ['#5c6370', 'Quiet / breaks', st.quietMs, st.quietPct]].filter((p) => p[3] > 0);
+  const top = st.topSquirrels.filter((t) => t.ms >= 60000).map((t) => `${esc(t.name)} ${fmtDur(t.ms)}`).join(', ');
+  return `<div class="meter"><b>🐿️ Squirrel-o-meter</b> <span class="hint">· ${fmtDur(st.totalMs)} session</span>
+    <div class="bar">${parts.map(([c, l, , p]) => `<span style="width:${p}%;background:${c}" title="${l}: ${p}%"></span>`).join('')}</div>
+    <div class="legend">${parts.map(([c, l, ms, p]) => `<span><i style="background:${c}"></i>${l} <b>${fmtDur(ms)}</b> (${p}%)</span>`).join('')}</div>
+    ${top ? `<div class="hint" style="margin-top:6px">Biggest squirrels: ${top}</div>` : ''}</div>`;
 }
 
 let showTableTalk = true;

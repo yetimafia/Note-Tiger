@@ -8,6 +8,7 @@ Built for Shadowrun, and it works for any game played over Discord voice.
 - 📼 Posts a recap when you're done (in **#recaps**): the job, NPCs, places, loot and nuyen, consequences, loose threads, best quotes. The full transcript goes to **#logs**, color-coded with a pastel color per person
 - 🎭 Knows who the game master is (by Discord role) and labels their lines as **Narrator**, the **NPC** they're voicing, or the GM speaking out of character
 - 🍕 Keeps off-topic table talk out of the recap. It stays in the transcript (dimmed), and the best jokes can still make **Best Lines**
+- 🐿️ **Squirrel-o-meter**: how much of the night was actually playing vs. going off on tangents, and who the biggest squirrel was
 - 🧠 Answers questions about past sessions: *"What did Mr. Johnson offer us for the Ares job?"*
 - 🖥️ A proper Windows app: a Note Tiger window with **Start / Stop bot**, sessions, questions and settings, plus a 🐯 tray icon so you know it's running
 - 💸 **Free by default:** speech-to-text and the recap AI can both run on your own PC. Nothing gets uploaded.

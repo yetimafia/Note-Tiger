@@ -25,6 +25,7 @@ import { DISCORD_TOKEN, WHISPER_MODEL, WHISPER_DTYPE, MODELS_DIR, LOG_CHANNEL, R
 import {
   readJSON, writeJSON, sessionsDir, getSettings, saveSettings, listSessions, readLines, saveGuildName,
   sessionLines, readTableTalk, readLabels, transcriptEntries, speakerColors, baseName, writeTranscriptFiles,
+  sessionStats, statsText,
 } from './store.js';
 import { askAI, recapSession, buildArchive, ASK_SYSTEM, AI_LABEL } from './ai.js';
 
@@ -128,7 +129,7 @@ function listenTo(guild, connection, userId) {
         const text = await transcribe(toMono16k(pcm));
         if (!text) return;
         const who = member ?? (await guild.members.fetch(userId).catch(() => null));
-        const line = { t: startedAt, speaker: speakerLabel(guild.id, who), text };
+        const line = { t: startedAt, d: Math.round(seconds * 10) / 10, speaker: speakerLabel(guild.id, who), text };
         if (isGM(who)) line.gm = true;
         rec.lines.push(line);
         fs.appendFileSync(path.join(rec.dir, 'transcript.jsonl'), JSON.stringify(line) + '\n');
@@ -274,10 +275,10 @@ async function stopSession(guild, channel, reason) {
   let logPosted = null;
   if (logChannel) {
     try {
-      const tableTalk = readTableTalk(rec.dir).size;
+      const st = sessionStats(rec.dir);
       await logChannel.send({
         content: `📜 **Transcript: ${rec.meta.title}** (${rec.meta.date}) · ${lines.length} lines` +
-          (tableTalk ? ` · ${tableTalk} marked as table talk` : ''),
+          (st ? ` · 🎲 ${st.gamePct}% game · 🐿️ ${st.squirrelPct}% squirrels` : ''),
         files: attachments(),
       });
       logPosted = logChannel;
@@ -294,7 +295,8 @@ async function stopSession(guild, channel, reason) {
   if (recap) {
     const pointer = logPosted ? `\n\n*Full transcript in <#${logPosted.id}>.*` : '';
     const recapFiles = logPosted ? [] : attachments();
-    const text = `# ${rec.meta.title} — ${rec.meta.date}\n${recap}${pointer}`;
+    const meter = statsText(sessionStats(rec.dir));
+    const text = `# ${rec.meta.title} — ${rec.meta.date}\n${recap}${meter ? `\n\n${meter}` : ''}${pointer}`;
     if (recapChannel) {
       try { await sendLong(recapChannel, text, recapFiles); recapPosted = recapChannel; }
       catch (err) {
@@ -470,7 +472,8 @@ client.on('interactionCreate', async (interaction) => {
         try { recap = await recapSession(s.dir); }
         catch (err) { return interaction.editReply(err.message); }
       }
-      const parts = splitForDiscord(`# ${s.title} — ${s.date}\n${recap}`);
+      const meter = statsText(sessionStats(s.dir));
+      const parts = splitForDiscord(`# ${s.title} — ${s.date}\n${recap}${meter ? `\n\n${meter}` : ''}`);
       await interaction.editReply(parts[0]);
       for (const p of parts.slice(1)) await interaction.followUp(p);
       return;

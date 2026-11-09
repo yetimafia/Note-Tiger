@@ -72,61 +72,132 @@ List, as short bullet points, only what happened in the game: events, decisions,
 the job and payment, nuyen/karma/loot, injuries and consequences, open leads, and any very memorable quotes.
 Lines labeled "(GM as <name>)" are the game master voicing that NPC. Skip out-of-character chatter. Do not invent anything.`;
 
-// ---------- table talk ----------
-const TABLE_TALK_SYSTEM = `You sort lines from a speech-to-text transcript of a Shadowrun tabletop RPG session.
-Each line starts with an id like L12. Find the stretches of OFF-TOPIC TABLE TALK: conversation that has nothing to do
-with the game, such as real life, work, food, other games, movies, sports, tech problems, or jokes unrelated to the game.
+// ---------- line tagging: game vs table talk, and who the GM is voicing ----------
+// One pass over the transcript in small chunks. Each line gets a label; small local models are far more
+// accurate labeling single lines than picking ranges out of long stretches.
+const TAG_SYSTEM = `You label lines from a speech-to-text transcript of a Shadowrun tabletop RPG session played over voice chat.
+Each line starts with an id like L12. Lines marked [GM] are spoken by the game master (storyteller).
 
-These are NOT table talk (they count as the game): anything said in character, the GM narrating or voicing NPCs,
-players deciding what their characters do, dice rolls and results, rules questions, planning the run, and
-jokes about what's happening in the game.
+Give every line ONE label:
+  G   = part of the game. This includes: talking in character, saying what characters do, plans, questions to
+        NPCs, dice rolls, rules, reacting to what happens in the game, jokes about the game. MOST lines are G.
+  T   = table talk: clearly NOT about the game. Real life, work, food, pets, other games or shows,
+        mic or computer problems, breaks, chatting before the game starts.
+For lines marked [GM] use one of these instead:
+  N          = the GM narrating or describing (scenes, places, what happens, results of actions)
+  NPC <name> = the GM speaking AS a character. Use the character's name from context, or a short
+               description like "Bouncer" or "Clerk" if unnamed. Keep the same name for the same character.
+               Never use a player's name.
+  GM         = the GM talking as themselves (rules, "roll for it", asking what players do)
+  T          = GM table talk
 
-Answer with JSON only, in this exact shape: {"offTopic": [[first_id, last_id], ...]}
-Use the numbers from the ids. A single line is [n, n]. If there is no table talk, answer {"offTopic": []}.
-When unsure, treat the line as part of the game.`;
+Short noises ("mm-hmm", "yeah", "okay", "oh god") get the same label as the conversation around them.
+If unsure: G for players, N for the GM.
+Answer with exactly one line per id and nothing else, in this format:
+L12 G
+L13 NPC Wendy
+L14 N
+L15 T`;
 
-function parseRanges(text) {
-  const match = text.match(/\{[\s\S]*\}/);
-  if (!match) return [];
-  try {
-    const ranges = JSON.parse(match[0]).offTopic;
-    return Array.isArray(ranges) ? ranges : [];
-  } catch {
-    return [];
+// "L13 NPC Wendy" -> { 13: { tag: 'NPC', name: 'Wendy' } }
+export function parseTags(text) {
+  const tags = {};
+  for (const raw of String(text).split(/\r?\n/)) {
+    const m = raw.trim().replace(/^[-*•\s]+/, '').match(/^L?(\d+)\s*[:.)-]?\s*(NPC|GM|G|T|N)\b[\s:,-]*(.*)$/i);
+    if (!m) continue;
+    const tag = m[2].toUpperCase();
+    tags[Number(m[1])] = { tag, name: tag === 'NPC' ? m[3].replace(/["*()[\]]/g, '').trim().slice(0, 40) : null };
   }
+  return tags;
 }
 
-// Tags off-topic lines and saves them to labels.json. Reuses the saved result unless the transcript changed.
-export async function classifyTableTalk(dir, { force = false } = {}) {
-  const lines = sessionLines(dir);
-  const labelsFile = path.join(dir, 'labels.json');
-  const saved = readJSON(labelsFile, null);
-  if (!force && saved && saved.lineCount === lines.length) return new Set(saved.offTopic);
-  if (!SEPARATE_TABLE_TALK || lines.length === 0) return new Set();
+const words = (t) => String(t).trim().split(/\s+/).filter(Boolean).length;
 
-  const offTopic = new Set();
-  const chunkChars = USE_CLAUDE ? 120_000 : 14_000;
-  let start = 0;
-  while (start < lines.length) {
-    let end = start, size = 0;
-    while (end < lines.length && (size < chunkChars || end === start)) { size += lines[end].text.length + 30; end++; }
-    const numbered = lines.slice(start, end).map((l, i) => `L${start + i} ${l.speaker}: ${l.text}`).join('\n');
-    console.log(`[table talk] checking lines ${start + 1}–${end} of ${lines.length}`);
+// Turns raw per-line tags into labels, smoothing out noise:
+// - table talk needs most of the nearby real lines to agree (one stray tag can't flip a scene)
+// - short filler lines ("mm-hmm") follow the lines around them
+// - NPC names that are really players' names (or "GM") are treated as the GM speaking
+export function applyTags(lines, raw, playerNames = []) {
+  const n = lines.length;
+  const players = new Set(playerNames.map((p) => p.toLowerCase()));
+  const isT = lines.map((_, i) => raw[i]?.tag === 'T');
+  const solid = lines.map((l) => words(l.text) >= 4);
+  const offTopic = new Array(n).fill(false);
+  for (let i = 0; i < n; i++) {
+    // up to 3 solid lines on each side, plus this one
+    const win = [];
+    for (let j = i - 1; j >= 0 && win.filter((k) => k < i).length < 3; j--) if (solid[j]) win.push(j);
+    for (let j = i + 1; j < n && win.filter((k) => k > i).length < 3; j++) if (solid[j]) win.push(j);
+    const votes = win.filter((k) => isT[k]).length + (isT[i] ? 1 : 0);
+    const total = win.length + 1;
+    offTopic[i] = solid[i] ? isT[i] && votes * 2 > total : votes * 2 > total;
+  }
+  const voices = new Map();
+  for (let i = 0; i < n; i++) {
+    if (!lines[i].gm || offTopic[i]) continue;
+    const r = raw[i];
+    let v = r?.tag === 'NPC' ? r.name : r?.tag === 'GM' ? 'GM' : r?.tag === 'N' ? 'Narrator' : null;
+    if (v && v !== 'GM' && v !== 'Narrator') {
+      const lower = v.toLowerCase();
+      if (!v || /\bgm\b|game ?master|narrat/i.test(v) || players.has(lower) || [...players].some((p) => p && lower.includes(p))) {
+        v = /narrat/i.test(v) ? 'Narrator' : 'GM';
+      }
+    }
+    if (v) voices.set(lineKey(lines[i]), v);
+  }
+  return { offTopic: new Set(lines.filter((_, i) => offTopic[i]).map(lineKey)), voices };
+}
+
+export async function tagLines(dir, { force = false } = {}) {
+  const lines = sessionLines(dir);
+  const saved = readJSON(path.join(dir, 'labels.json'), {});
+  if (!force && saved.tagVersion === 2 && saved.lineCount === lines.length) {
+    return { offTopic: new Set(saved.offTopic || []), voices: new Map(Object.entries(saved.voices || {})) };
+  }
+  if (lines.length === 0 || (!SEPARATE_TABLE_TALK && !lines.some((l) => l.gm))) {
+    updateLabels(dir, { tagVersion: 2, lineCount: lines.length, offTopic: [], voices: {}, voiceLineCount: lines.length });
+    return { offTopic: new Set(), voices: new Map() };
+  }
+  // Names that can't be NPCs: the people at the table and their runners.
+  const playerNames = [...new Set(lines.flatMap((l) => {
+    const m = l.speaker.match(/^(.*?)\s*\(([^)]*)\)\s*$/);
+    return m ? [m[1], m[2].replace(/^GM( as .*)?$/, '')] : [l.speaker];
+  }).map((s) => s.trim()).filter((s) => s && s.length > 1))];
+
+  const raw = {};
+  const known = new Set();
+  const size = USE_CLAUDE ? 200 : 40;
+  const started = Date.now();
+  for (let start = 0; start < lines.length; start += size) {
+    const end = Math.min(start + size, lines.length);
+    const context = lines.slice(Math.max(0, start - 6), start)
+      .map((l) => `(earlier) ${l.gm ? '[GM] ' : ''}${l.speaker}: ${l.text}`).join('\n');
+    const body = lines.slice(start, end).map((l, k) => `L${start + k} ${l.gm ? '[GM] ' : ''}${l.speaker}: ${l.text}`).join('\n');
+    const knownPart = known.size ? `Characters the GM has voiced so far: ${[...known].slice(-15).join(', ')}\n\n` : '';
+    if (start % (size * 10) === 0) console.log(`[tagging] lines ${start + 1}–${Math.min(start + size * 10, lines.length)} of ${lines.length}`);
     try {
-      const answer = await askAI(TABLE_TALK_SYSTEM, numbered, 1500, { json: true });
-      for (const range of parseRanges(answer)) {
-        const [a, b] = (Array.isArray(range) ? range : [range, range]).map(Number);
-        if (!Number.isFinite(a)) continue;
-        for (let i = Math.max(a, start); i <= Math.min(Number.isFinite(b) ? b : a, end - 1); i++) offTopic.add(lineKey(lines[i]));
+      const answer = await askAI(TAG_SYSTEM, `${knownPart}${context ? `${context}\n\n` : ''}LABEL THESE LINES:\n${body}`, size * 12);
+      const tags = parseTags(answer);
+      for (const [id, t] of Object.entries(tags)) {
+        const i = Number(id);
+        if (i < start || i >= end) continue;
+        raw[i] = t;
+        if (t.tag === 'NPC' && t.name && lines[i].gm) known.add(t.name);
       }
     } catch (err) {
-      console.error('[table talk] skipped a part:', err.message);
+      console.error('[tagging] skipped a part:', err.message);
     }
-    start = end;
   }
-  updateLabels(dir, { lineCount: lines.length, offTopic: [...offTopic] });
-  console.log(`[table talk] ${offTopic.size} of ${lines.length} lines are table talk`);
-  return offTopic;
+  if (!SEPARATE_TABLE_TALK) for (const k of Object.keys(raw)) if (raw[k].tag === 'T') raw[k] = { tag: lines[k].gm ? 'N' : 'G' };
+  const { offTopic, voices } = applyTags(lines, raw, playerNames);
+  updateLabels(dir, {
+    tagVersion: 2, lineCount: lines.length, voiceLineCount: lines.length,
+    offTopic: [...offTopic], voices: Object.fromEntries(voices),
+  });
+  const npcs = [...new Set([...voices.values()].filter((v) => v !== 'GM' && v !== 'Narrator'))];
+  console.log(`[tagging] done in ${Math.round((Date.now() - started) / 1000)}s: ${offTopic.size} of ${lines.length} lines table talk, ` +
+    `${voices.size} GM lines labeled${npcs.length ? ` (NPCs: ${npcs.slice(0, 12).join(', ')})` : ''}`);
+  return { offTopic, voices };
 }
 
 // ---------- the opening "previously on..." recap ----------
@@ -177,66 +248,6 @@ export async function detectOpeningRecap(dir, { prevRecap = null, force = false 
   return new Set(recap);
 }
 
-// ---------- who the GM is voicing ----------
-const VOICES_SYSTEM = `You help label a speech-to-text transcript of a Shadowrun tabletop RPG session.
-Each line starts with an id like L12. Lines marked [GM] are spoken by the game master (storyteller).
-For every [GM] line, decide who the GM is speaking as, using the surrounding lines for context:
-- "Narrator": describing scenes, places, what happens, results of actions.
-- An NPC's name, when the GM speaks as a character (dialogue, often in first person). Use the name from context
-  (e.g. "Mr. Johnson"). If the NPC has no name, use a short description like "Bouncer" or "Security guard".
-  Keep using the same name for the same character.
-- "GM": talking as themselves, out of character (rules, dice, asking players what they do, breaks).
-
-Answer with JSON only: {"voices": [{"from": first_id, "to": last_id, "as": "Name"}, ...]}
-Group consecutive [GM] lines with the same voice into one range. Only include [GM] lines.`;
-
-// Labels each GM line as Narrator / an NPC / GM, and saves the result to labels.json.
-export async function attributeVoices(dir, offTopic = new Set(), { force = false } = {}) {
-  const lines = sessionLines(dir);
-  const saved = readJSON(path.join(dir, 'labels.json'), {});
-  if (!force && saved.voices && saved.voiceLineCount === lines.length) return new Map(Object.entries(saved.voices));
-  const gmIdx = lines.map((l, i) => (l.gm && !offTopic.has(lineKey(l)) ? i : -1)).filter((i) => i >= 0);
-  if (gmIdx.length === 0) { updateLabels(dir, { voiceLineCount: lines.length, voices: {} }); return new Map(); }
-
-  const voices = new Map();
-  const known = new Set();
-  const chunkChars = USE_CLAUDE ? 120_000 : 12_000;
-  let start = 0;
-  while (start < lines.length) {
-    let end = start, size = 0;
-    while (end < lines.length && (size < chunkChars || end === start)) { size += lines[end].text.length + 30; end++; }
-    if (gmIdx.some((i) => i >= start && i < end)) {
-      const ctx = lines.slice(start, end).map((l, k) => {
-        const i = start + k;
-        if (offTopic.has(lineKey(l))) return null; // table talk isn't useful context
-        return `L${i} ${l.gm ? '[GM] ' : ''}${l.speaker}: ${l.text}`;
-      }).filter(Boolean).join('\n');
-      const knownPart = known.size ? `Characters the GM has voiced so far: ${[...known].join(', ')}\n\n` : '';
-      console.log(`[voices] labeling GM lines ${start + 1}–${end} of ${lines.length}`);
-      try {
-        const answer = await askAI(VOICES_SYSTEM, knownPart + ctx, 2000, { json: true });
-        const m = answer.match(/\{[\s\S]*\}/);
-        const ranges = m ? JSON.parse(m[0]).voices : [];
-        for (const r of Array.isArray(ranges) ? ranges : []) {
-          const who = String(r?.as ?? '').trim().slice(0, 40);
-          const a = Number(r?.from), b = Number.isFinite(Number(r?.to)) ? Number(r.to) : a;
-          if (!who || !Number.isFinite(a)) continue;
-          for (let i = Math.max(a, start); i <= Math.min(b, end - 1); i++) {
-            if (lines[i]?.gm) voices.set(lineKey(lines[i]), /^(gm|game ?master)$/i.test(who) ? 'GM' : /^narrat/i.test(who) ? 'Narrator' : who);
-          }
-          if (!/^(gm|game ?master|narrat)/i.test(who)) known.add(who);
-        }
-      } catch (err) {
-        console.error('[voices] skipped a part:', err.message);
-      }
-    }
-    start = end;
-  }
-  updateLabels(dir, { voiceLineCount: lines.length, voices: Object.fromEntries(voices) });
-  console.log(`[voices] labeled ${voices.size} of ${gmIdx.length} GM lines${known.size ? ` (NPCs: ${[...known].join(', ')})` : ''}`);
-  return voices;
-}
-
 // ---------- recaps ----------
 // Table talk lines worth considering for Best Lines (short and punchy), within a size budget.
 function tableTalkCandidates(tableText, budget) {
@@ -278,9 +289,8 @@ export async function recapSession(dir, { prevRecap = previousRecap(dir), reclas
   const lines = sessionLines(dir);
   const notes = readJSON(path.join(dir, 'notes.json'), []);
   if (lines.length === 0 && notes.length === 0) throw new Error('That session has no transcript.');
-  const offTopic = await classifyTableTalk(dir, { force: reclassify });
+  const { offTopic, voices } = await tagLines(dir, { force: reclassify });
   const recap = await detectOpeningRecap(dir, { prevRecap, force: reclassify });
-  const voices = await attributeVoices(dir, new Set([...offTopic, ...recap]), { force: reclassify });
   const labels = { offTopic, voices, recap };
   writeTranscriptFiles(dir);
   const text = await writeRecap(

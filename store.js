@@ -157,6 +157,7 @@ export function readSession(gid, id) {
     tableTalkLines: labels.offTopic.size,
     recapLines: entries.filter((e) => e.recap).length,
     playStartedAt: meta.playStartedAt ?? null,
+    stats: sessionStats(dir),
   };
 }
 
@@ -189,6 +190,10 @@ export function transcriptHtml(gid, dir) {
   const people = [...new Set(entries.filter((e) => e.kind === 'say').map((e) => baseName(e.speaker)))]
     .map((n) => `<span class="p"><i style="background:${colors[n]}"></i>${escHtml(n)}</span>`).join('');
   const tt = entries.filter((e) => e.offTopic).length;
+  const st = sessionStats(dir);
+  const statBar = st ? `<div class="bar">${[['#7bd88f', st.gamePct, '🎲 Game'], ['#f5a524', st.squirrelPct, '🐿️ Squirrels'], ['#9be7ef', st.recapPct, '📖 Recap'], ['#5c6370', st.quietPct, '☕ Quiet']]
+    .filter(([, p]) => p > 0).map(([c, p, l]) => `<span style="width:${p}%;background:${c}" title="${l} ${p}%"></span>`).join('')}</div>
+<div class="legend">🎲 Game <b>${formatDuration(st.gameMs)}</b> (${st.gamePct}%) · 🐿️ Squirrels <b>${formatDuration(st.squirrelMs)}</b> (${st.squirrelPct}%)${st.recapMs ? ` · 📖 Recap ${formatDuration(st.recapMs)}` : ''}${st.quietMs >= 60000 ? ` · ☕ Quiet ${formatDuration(st.quietMs)}` : ''}${st.topSquirrels[0] ? ` · Biggest squirrel: <b>${escHtml(st.topSquirrels[0].name)}</b>` : ''}</div>` : '';
   return `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${escHtml(meta.title || 'Transcript')} (${escHtml(meta.date || '')})</title><style>
 body{margin:0;background:#313338;color:#dbdee1;font:15px/1.45 "gg sans","Segoe UI",system-ui,sans-serif}
@@ -203,13 +208,68 @@ label{color:#b5bac1;font-size:13px;cursor:pointer;display:inline-block;margin-bo
 .b.tt{opacity:.62}.b.tt .ln{font-style:italic}.b.note{background:#26282c}
 .tag{font-size:11px;font-weight:500;color:#b5bac1;background:#1e1f22;border-radius:99px;padding:1px 7px;margin-left:8px}
 body.hide-tt .b.tt{display:none}
+.bar{display:flex;height:12px;border-radius:99px;overflow:hidden;background:#1e1f22;margin:4px 0 6px}.bar span{display:block;height:100%}
+.legend{color:#b5bac1;font-size:13px;margin-bottom:12px}
 </style></head><body><main>
 <h1>📜 ${escHtml(meta.title || 'Transcript')}</h1>
 <div class="sub">${escHtml(meta.date || '')}${meta.voiceChannel ? ` · ${escHtml(meta.voiceChannel)}` : ''} · ${entries.length} lines${tt ? ` · ${tt} table talk` : ''} · Note Tiger</div>
+${statBar}
 <div class="people">${people}</div>
 ${tt ? '<label><input type="checkbox" checked onchange="document.body.classList.toggle(\'hide-tt\',!this.checked)"> Show table talk</label>' : ''}
 ${blocks}
 </main></body></html>`;
+}
+
+// ---------- squirrel-o-meter: how much of the session was the game ----------
+// Each stretch of time from one line to the next counts toward what that line was (game, table talk,
+// or the opening recap). Silences over 2 minutes count as quiet/breaks.
+export function sessionStats(dir) {
+  const lines = sessionLines(dir);
+  if (lines.length < 2) return null;
+  const meta = readJSON(path.join(dir, 'meta.json'), {});
+  const { offTopic, recap } = readLabels(dir);
+  const start = Math.min(lines[0].t, Date.parse(meta.startedAt) || Infinity);
+  const end = Math.max(lines.at(-1).t + 5000, Date.parse(meta.endedAt) || 0);
+  const ms = { game: 0, squirrel: 0, recap: 0, quiet: lines[0].t - start };
+  const squirrels = {};
+  for (let i = 0; i < lines.length; i++) {
+    const l = lines[i];
+    const gap = (lines[i + 1]?.t ?? end) - l.t;
+    const kind = offTopic.has(lineKey(l)) ? 'squirrel' : recap.has(lineKey(l)) ? 'recap' : 'game';
+    const counted = Math.min(gap, 120_000);
+    ms[kind] += counted;
+    ms.quiet += gap - counted;
+    if (kind === 'squirrel') squirrels[baseName(l.speaker)] = (squirrels[baseName(l.speaker)] || 0) + counted;
+  }
+  const total = Object.values(ms).reduce((a, b) => a + b, 0) || 1;
+  const pct = (v) => Math.round((v / total) * 100);
+  const top = Object.entries(squirrels).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([name, t]) => ({ name, ms: t }));
+  return {
+    totalMs: total,
+    gameMs: ms.game, squirrelMs: ms.squirrel, recapMs: ms.recap, quietMs: ms.quiet,
+    gamePct: pct(ms.game), squirrelPct: pct(ms.squirrel), recapPct: pct(ms.recap), quietPct: pct(ms.quiet),
+    topSquirrels: top,
+  };
+}
+
+export function formatDuration(ms) {
+  const m = Math.round(ms / 60000);
+  return m >= 60 ? `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, '0')}m` : `${m}m`;
+}
+
+// For Discord: a few short lines.
+export function statsText(stats) {
+  if (!stats) return '';
+  const row = (emoji, label, v, p) => (v >= 60_000 ? `${emoji} ${label}: **${formatDuration(v)}** (${p}%)` : null);
+  const rows = [
+    row('🎲', 'Playing the game', stats.gameMs, stats.gamePct),
+    row('🐿️', 'Squirrels (off-topic)', stats.squirrelMs, stats.squirrelPct),
+    row('📖', 'Recapping last session', stats.recapMs, stats.recapPct),
+    row('☕', 'Quiet / breaks', stats.quietMs, stats.quietPct),
+  ].filter(Boolean);
+  const top = stats.topSquirrels[0] && stats.topSquirrels[0].ms >= 60_000
+    ? `\nBiggest squirrel: **${stats.topSquirrels[0].name}** (${formatDuration(stats.topSquirrels[0].ms)})` : '';
+  return `**🐿️ Squirrel-o-meter** · ${formatDuration(stats.totalMs)} session\n${rows.join('\n')}${top}`;
 }
 
 // The recap of the session before this one (for context), if there is one.
