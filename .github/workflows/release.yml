@@ -1,9 +1,10 @@
-# Builds the Windows installer and publishes it as a GitHub release when a version tag (v1.2.3) is pushed.
+# Publishes a GitHub release with the Windows installer whenever package.json gets a new version on main.
 # Note Tiger's "Update now" button downloads the installer from the latest release.
 name: Release
 on:
   push:
-    tags: ['v*']
+    branches: [main]
+    paths: [package.json]
   workflow_dispatch:
 
 permissions:
@@ -14,34 +15,42 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Is this version released yet?
+        id: v
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          v=$(node -p "require('./package.json').version")
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          if gh release view "v$v" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "v$v is already released."; echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
       - uses: actions/setup-node@v4
+        if: steps.v.outputs.skip == 'false'
         with:
           node-version: 22
       - uses: actions/setup-go@v5
+        if: steps.v.outputs.skip == 'false'
         with:
           go-version-file: window/go.mod
           cache: false
       - name: Install build tools
+        if: steps.v.outputs.skip == 'false'
         run: sudo apt-get update && sudo apt-get install -y nsis gcc-mingw-w64-x86-64
-      - name: Check the tag matches package.json
-        if: startsWith(github.ref, 'refs/tags/')
-        run: |
-          v=$(node -p "require('./package.json').version")
-          [ "v$v" = "${GITHUB_REF_NAME}" ] || { echo "Tag ${GITHUB_REF_NAME} doesn't match package.json version $v"; exit 1; }
       - name: Build installer
+        if: steps.v.outputs.skip == 'false'
         env:
           GOPROXY: https://proxy.golang.org,direct
         run: bash installer/build.sh
       - name: Publish release
-        if: startsWith(github.ref, 'refs/tags/')
+        if: steps.v.outputs.skip == 'false'
         uses: softprops/action-gh-release@v2
         with:
-          name: Note Tiger ${{ github.ref_name }}
+          tag_name: v${{ steps.v.outputs.version }}
+          target_commitish: ${{ github.sha }}
+          name: Note Tiger ${{ steps.v.outputs.version }}
           body_path: installer/release-notes.md
           files: dist/NoteTiger-Setup-*.exe
-      - name: Keep the installer (manual runs)
-        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: installer
-          path: dist/NoteTiger-Setup-*.exe
+          make_latest: true
