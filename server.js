@@ -7,6 +7,7 @@ import {
   APP_DIR, DISCORD_TOKEN, PANEL_PORT, AUTO_START, USE_CLAUDE, OLLAMA_MODEL, CAMPAIGN_NAME, WHISPER_MODEL,
 } from './config.js';
 import { listSessions, readSession, sessionDir, knownGuilds, transcriptHtml } from './store.js';
+import { buildCampaign, addEdit } from './campaign.js';
 import { recapSession, askArchive, ollamaStatus, refreshOllama, AI_LABEL, getProgress } from './ai.js';
 import { startWeb } from './web.js';
 import { publishSite, siteStatus, siteConfigured } from './site.js';
@@ -184,6 +185,21 @@ startWeb({
     if (liveSessionId(gid) === id) throw new Error('That session is still recording.');
     return askBot({ type: 'repost', gid, sessionId: id });
   },
+  campaign(gid) { return buildCampaign(safeGid(gid)); },
+  campaignEdit(gid, edit) {
+    const allowed = {
+      'thread-add': ['text'], 'thread-close': ['id', 'how'], 'thread-reopen': ['id'], 'thread-delete': ['id'],
+      'thread-edit': ['id', 'text'], 'npc-add': ['name', 'who', 'attitude'], 'npc-edit': ['key', 'who', 'attitude'], 'npc-delete': ['key'],
+    }[edit?.type];
+    if (!allowed) throw new Error('Unknown change.');
+    const clean = { type: edit.type, by: 'Note Tiger' };
+    for (const f of allowed) if (edit[f] !== undefined) clean[f] = String(edit[f]).replace(/\s+/g, ' ').trim().slice(0, 300);
+    if ((clean.type === 'thread-add' || clean.type === 'thread-edit') && !clean.text) throw new Error('Type the loose end first.');
+    if (clean.type === 'npc-add' && !clean.name) throw new Error('Type a name first.');
+    addEdit(safeGid(gid), clean);
+    refreshSiteSoon();
+    return buildCampaign(safeGid(gid));
+  },
   library() { return { books: listBooks(), progress: libraryProgress(), folder: LIB_DIR }; },
   addBook(name, buffer) { return addBook(name, buffer); },
   removeBook(key) { removeBook(key); },
@@ -215,6 +231,14 @@ startWeb({
     process.exit(0);
   },
 }, PANEL_PORT);
+
+// Hand edits to contacts/loose ends: refresh the player website a little later (edits often come in bursts).
+let siteTimer = null;
+function refreshSiteSoon() {
+  if (!siteConfigured()) return;
+  clearTimeout(siteTimer);
+  siteTimer = setTimeout(() => publishSite({ dirs: [] }).catch((e) => console.error('[website]', e.message)), 15_000);
+}
 
 console.log(`Note Tiger manager running. Panel: http://localhost:${PANEL_PORT}`);
 

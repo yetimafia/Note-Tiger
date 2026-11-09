@@ -10,9 +10,10 @@ import {
   listSessions, readJSON, formatTranscript, sessionLines, readLabels, updateLabels, lineKey, writeTranscriptFiles,
   previousRecap,
 } from './store.js';
+import { updateCampaign, rulesSection } from './campaign.js';
 
 // ---------- progress (shown as a progress bar in Note Tiger) ----------
-// Key: "<server id>/<session id>". Stages: tagging 0–70%, opening recap 70–75%, notes 75–95%, recap 95–100%.
+// Key: "<server id>/<session id>". Stages: tagging 0–70%, opening recap 70–75%, notes and recap 75–99%, contacts 99–100%.
 const progress = new Map();
 const progKey = (dir) => `${path.basename(path.dirname(path.dirname(dir)))}/${path.basename(dir)}`;
 function setProgress(dir, from, to, frac, label) {
@@ -326,8 +327,18 @@ async function recapSessionInner(dir, { prevRecap = previousRecap(dir), reclassi
     prevRecap,
     dir,
   );
-  fs.writeFileSync(path.join(dir, 'recap.md'), text);
-  return text;
+  // Contacts and loose ends come from the recap; a failure here never loses the recap itself.
+  try {
+    setProgress(dir, 99, 100, 0, 'Updating contacts and loose ends');
+    await updateCampaign(dir, text, askAI);
+  } catch (err) {
+    console.error('[campaign] skipped:', err.message);
+  }
+  // Rules looked up with /game ask during the session.
+  const rules = rulesSection(dir);
+  const full = rules ? `${text.trim()}\n\n${rules}` : text;
+  fs.writeFileSync(path.join(dir, 'recap.md'), full);
+  return full;
 }
 
 export const RECAP_SYSTEM = `You are the campaign scribe for ${CAMPAIGN_NAME}, a Shadowrun tabletop RPG game.

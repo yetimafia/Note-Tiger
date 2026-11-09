@@ -76,6 +76,22 @@
   .recap blockquote { border-left: 3px solid var(--accent); margin: 8px 0; padding: 2px 12px; color: var(--dim); }
   .recap ul { padding-left: 22px; }
   pre.transcript { white-space: pre-wrap; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 14px; max-height: 60vh; overflow: auto; font-size: 13px; }
+  .camp { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr); gap: 16px; }
+  @media (max-width: 900px) { .camp { grid-template-columns: minmax(0,1fr); } }
+  .npc { border-bottom: 1px solid var(--line); padding: 10px 0; }
+  .npc:last-child { border-bottom: 0; }
+  .npc summary { cursor: pointer; list-style: none; display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+  .npc summary::-webkit-details-marker { display: none; }
+  .npc .att { font-size: 12px; padding: 1px 8px; border-radius: 99px; background: var(--panel2); border: 1px solid var(--line); color: var(--accent2); }
+  .npc ul { margin: 8px 0 4px; padding-left: 18px; color: var(--dim); font-size: 14px; }
+  .thr { display: flex; gap: 10px; align-items: flex-start; padding: 9px 0; border-bottom: 1px solid var(--line); }
+  .thr:last-child { border-bottom: 0; }
+  .thr .n { color: var(--accent); font-weight: 700; min-width: 22px; }
+  .thr .tx { flex: 1; min-width: 0; }
+  .thr .d { color: var(--dim); font-size: 12px; }
+  .thr.done .tx > span:first-child { text-decoration: line-through; color: var(--dim); }
+  .mini { background: none; border: 1px solid var(--line); color: var(--dim); border-radius: 6px; padding: 2px 8px; font: inherit; font-size: 12px; cursor: pointer; white-space: nowrap; }
+  .mini:hover { color: var(--text); border-color: var(--dim); }
   .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
   .answer { white-space: pre-wrap; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 14px; margin-top: 14px; }
   .empty { color: var(--dim); text-align: center; padding: 40px 10px; }
@@ -120,6 +136,7 @@
   <nav>
     <button data-tab="home" class="active">Dashboard</button>
     <button data-tab="sessions">Sessions</button>
+    <button data-tab="campaign">Campaign</button>
     <button data-tab="ask">Ask</button>
     <button data-tab="library">Library</button>
     <button data-tab="settings">Settings</button>
@@ -178,6 +195,29 @@
     <div class="sessions">
       <div class="card list" id="sessList"></div>
       <div class="card" id="sessView"><div class="empty">Pick a session on the left.</div></div>
+    </div>
+  </section>
+
+  <!-- CAMPAIGN -->
+  <section id="tab-campaign" hidden>
+    <div class="row" style="justify-content:space-between">
+      <div><h1>🕵️ Campaign</h1><p class="sub">Contacts and loose ends, picked up from every recap. Fix anything the AI got wrong here.</p></div>
+      <select id="campGuild" style="width:auto;min-width:200px"></select>
+    </div>
+    <div class="camp">
+      <div class="card">
+        <div class="row" style="justify-content:space-between"><h2 style="margin:0">Contacts &amp; NPCs <span class="hint" id="campNpcCount"></span></h2>
+          <input type="text" id="campNpcQ" placeholder="Search…" style="width:180px"></div>
+        <div id="campNpcs"><div class="empty">Loading…</div></div>
+        <div class="row" style="margin-top:12px"><input type="text" id="campNpcName" placeholder="Add someone by hand: name" style="flex:1;min-width:140px"><input type="text" id="campNpcWho" placeholder="who they are" style="flex:1;min-width:140px"><button class="btn ghost" id="campNpcAdd">Add</button></div>
+      </div>
+      <div class="card">
+        <h2 style="margin-top:0">🧵 Loose ends <span class="hint" id="campThrCount"></span></h2>
+        <div id="campOpen"><div class="empty">Loading…</div></div>
+        <div class="row" style="margin-top:12px"><input type="text" id="campThrText" placeholder="Add a loose end, e.g. We still owe Sticks 5,000¥" style="flex:1"><button class="btn ghost" id="campThrAdd">Add</button></div>
+        <h2 style="margin-top:22px">✅ Tied up</h2>
+        <div id="campClosed"></div>
+      </div>
     </div>
   </section>
 
@@ -366,6 +406,7 @@ function showTab(name) {
   if (name === 'sessions') loadSessions();
   if (name === 'settings') loadSettings();
   if (name === 'library') loadLibrary();
+  if (name === 'campaign') loadCampaign();
   location.hash = name;
 }
 
@@ -477,12 +518,13 @@ function renderHome() {
 }
 
 function fillGuildSelects() {
-  for (const id of ['#sessGuild', '#askGuild']) {
+  for (const id of ['#sessGuild', '#askGuild', '#campGuild']) {
     const sel = $(id), prev = sel.value;
     const opts = status.guilds.map((g) => `<option value="${g.id}">${esc(g.name)}</option>`).join('');
     if (sel.dataset.opts !== opts) {
       sel.innerHTML = opts || '<option value="">No servers</option>'; sel.dataset.opts = opts;
       if (id === '#sessGuild' && !$('#tab-sessions').hidden) loadSessions();
+      if (id === '#campGuild' && !$('#tab-campaign').hidden) loadCampaign();
     }
     if (prev && [...sel.options].some((o) => o.value === prev)) sel.value = prev;
   }
@@ -493,6 +535,67 @@ async function setupLocalAI(btn) {
   try { await api('/api/setup-local-ai', { method: 'POST', body: {} }); toast('A setup window opened. It downloads about 6.5 GB, so leave it running.'); }
   catch (err) { toast(err.message); btn.disabled = false; }
 }
+
+// ---------- campaign (contacts + loose ends) ----------
+let camp = null;
+async function loadCampaign() {
+  const gid = $('#campGuild').value;
+  if (!gid) { $('#campNpcs').innerHTML = $('#campOpen').innerHTML = '<div class="empty">Start the bot to see your servers.</div>'; return; }
+  try { camp = await api(`/api/campaign/${gid}`); renderCampaign(); }
+  catch (err) { $('#campNpcs').innerHTML = `<div class="empty">${esc(err.message)}</div>`; }
+}
+async function campEdit(edit) {
+  try { camp = await api(`/api/campaign/${$('#campGuild').value}`, { method: 'POST', body: edit }); renderCampaign(); }
+  catch (err) { toast(err.message); }
+}
+function renderCampaign() {
+  const q = $('#campNpcQ').value.trim().toLowerCase();
+  const npcs = camp.contacts.filter((c) => !q || `${c.name} ${c.who} ${c.attitude}`.toLowerCase().includes(q));
+  $('#campNpcCount').textContent = `(${camp.contacts.length})`;
+  $('#campNpcs').innerHTML = npcs.length ? npcs.map((c) => `<details class="npc" data-key="${esc(c.key)}">
+      <summary><b>${esc(c.name)}</b>${c.who ? `<span class="hint" style="margin:0">${esc(c.who)}</span>` : ''}${c.attitude ? `<span class="att">${esc(c.attitude)}</span>` : ''}</summary>
+      <div class="hint">First met: ${esc(c.first?.title || '?')} (${esc(c.first?.date || '?')})${c.last && c.last.id !== c.first?.id ? ` · last seen: ${esc(c.last.title)} (${esc(c.last.date)})` : ''}</div>
+      ${c.history.length ? `<ul>${c.history.map((h) => `<li><i>${esc(h.date)}:</i> ${esc(h.text)}</li>`).join('')}</ul>` : ''}
+      <div class="row" style="gap:6px;margin-top:6px"><button class="mini" data-act="npc-edit">Edit</button><button class="mini" data-act="npc-delete">Remove</button></div>
+    </details>`).join('')
+    : `<div class="empty">${camp.contacts.length ? 'Nobody matches that search.' : 'No contacts yet. They\'re picked up when a recap is written (or rewritten).'}</div>`;
+  $('#campThrCount').textContent = `(${camp.open.length} open)`;
+  const thr = (t, done) => `<div class="thr ${done ? 'done' : ''}" data-id="${esc(t.id)}">
+      <span class="n">${done ? '✓' : t.n + '.'}</span>
+      <div class="tx"><span>${esc(t.text)}</span>${done && t.how ? `<span> — ${esc(t.how)}</span>` : ''}
+        <div class="d">${esc(t.opened?.title || '')}${t.opened?.date ? ` (${esc(t.opened.date)})` : ''}${done && t.closed ? ` · tied up: ${esc(t.closed.title)}` : ''}</div></div>
+      ${done ? '<button class="mini" data-act="thread-reopen">Reopen</button>'
+             : '<button class="mini" data-act="thread-close">Done</button><button class="mini" data-act="thread-edit">Edit</button>'}
+      <button class="mini" data-act="thread-delete" title="Remove (it was never a real loose end)">✕</button></div>`;
+  $('#campOpen').innerHTML = camp.open.length ? camp.open.map((t) => thr(t, false)).join('') : '<div class="empty">Nothing open.</div>';
+  $('#campClosed').innerHTML = camp.closed.length ? camp.closed.map((t) => thr(t, true)).join('') : '<div class="hint">Nothing yet.</div>';
+}
+$('#campGuild').addEventListener('change', loadCampaign);
+$('#campNpcQ').addEventListener('input', () => camp && renderCampaign());
+$('#tab-campaign').addEventListener('click', (e) => {
+  const b = e.target.closest('button.mini'); if (!b) return;
+  e.preventDefault();
+  const act = b.dataset.act;
+  if (act.startsWith('npc')) {
+    const key = b.closest('.npc').dataset.key, c = camp.contacts.find((x) => x.key === key);
+    if (act === 'npc-delete') { if (confirm(`Remove ${c.name} from the contacts?`)) campEdit({ type: act, key }); return; }
+    const who = prompt(`Who is ${c.name}?`, c.who); if (who === null) return;
+    const attitude = prompt(`How does ${c.name} feel about the team?`, c.attitude); if (attitude === null) return;
+    return campEdit({ type: act, key, who, attitude });
+  }
+  const id = b.closest('.thr').dataset.id, t = [...camp.open, ...camp.closed].find((x) => x.id === id);
+  if (act === 'thread-close') { const how = prompt('How was it settled? (optional)', ''); if (how === null) return; return campEdit({ type: act, id, how }); }
+  if (act === 'thread-edit') { const text = prompt('Loose end:', t.text); if (!text) return; return campEdit({ type: act, id, text }); }
+  if (act === 'thread-delete' && !confirm('Remove this loose end completely?')) return;
+  campEdit({ type: act, id });
+});
+$('#campThrAdd').addEventListener('click', async () => { const text = $('#campThrText').value.trim(); if (!text) return; await campEdit({ type: 'thread-add', text }); $('#campThrText').value = ''; });
+$('#campThrText').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('#campThrAdd').click(); });
+$('#campNpcAdd').addEventListener('click', async () => {
+  const name = $('#campNpcName').value.trim(); if (!name) return;
+  await campEdit({ type: 'npc-add', name, who: $('#campNpcWho').value.trim() });
+  $('#campNpcName').value = $('#campNpcWho').value = '';
+});
 
 // ---------- activity log ----------
 let logOpen = false;
@@ -815,7 +918,7 @@ $('#saveBtn').addEventListener('click', async () => {
 });
 
 // ---------- start ----------
-showTab(['sessions', 'ask', 'library', 'settings'].includes(location.hash.slice(1)) ? location.hash.slice(1) : 'home');
+showTab(['sessions', 'campaign', 'ask', 'library', 'settings'].includes(location.hash.slice(1)) ? location.hash.slice(1) : 'home');
 refreshStatus().then(() => { if (status && !status.hasToken) showTab('settings'); });
 setInterval(refreshStatus, 5000);
 </script>

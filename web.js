@@ -207,6 +207,12 @@ export function startWeb(ctx, port) {
         }
       }
 
+      // GET /api/campaign/:guild   POST /api/campaign/:guild {type, ...}
+      if (parts[1] === 'campaign' && parts[2]) {
+        if (req.method === 'GET') return send(res, 200, ctx.campaign(parts[2]));
+        if (req.method === 'POST') return send(res, 200, ctx.campaignEdit(parts[2], await readBody(req)));
+      }
+
       // POST /api/ask {guild, question}
       if (parts[1] === 'ask' && req.method === 'POST') {
         const { guild, question } = await readBody(req);

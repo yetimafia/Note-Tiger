@@ -14,6 +14,7 @@ import {
   knownGuilds, listSessions, readJSON, writeJSON, sessionLines, readLabels, transcriptEntries, speakerColors,
   baseName, sessionStats, gidOf,
 } from './store.js';
+import { buildCampaign } from './campaign.js';
 
 const ITERATIONS = 600_000;
 const STATE_FILE = path.join(DATA_DIR, 'site.json');   // salt, password check, file names (stays on this PC)
@@ -88,7 +89,18 @@ function manifestFor(st, dirs) {
     const people = [...new Set(sessionLines(dir).map((l) => baseName(l.speaker)))].map((name) => ({ name, color: colors[name] }));
     return { id, file: `${id}.enc`, title: meta.title, date: meta.date, stats, people, sort: meta.startedAt || meta.date };
   }).filter(Boolean).sort((a, b) => String(a.sort).localeCompare(String(b.sort)));
-  return { campaign: CAMPAIGN_NAME, updated: new Date().toISOString(), sessions };
+  // Contacts and loose ends for each server that has sessions on the site.
+  const trackers = [...new Set(dirs.map(gidOf))].map((gid) => {
+    const c = buildCampaign(gid);
+    const at = (x) => (x ? { title: x.title, date: x.date } : null);
+    return {
+      server: knownGuilds().find((g) => g.id === gid)?.name || '',
+      contacts: c.contacts.map((n) => ({ name: n.name, who: n.who, attitude: n.attitude, first: at(n.first), history: n.history.map((h) => ({ date: h.date, title: h.title, text: h.text })) })),
+      open: c.open.map((t) => ({ n: t.n, text: t.text, opened: at(t.opened) })),
+      closed: c.closed.map((t) => ({ text: t.text, how: t.how, opened: at(t.opened), closed: at(t.closed) })),
+    };
+  }).filter((t) => t.contacts.length || t.open.length || t.closed.length);
+  return { campaign: CAMPAIGN_NAME, updated: new Date().toISOString(), sessions, trackers };
 }
 
 // ---------- GitHub ----------

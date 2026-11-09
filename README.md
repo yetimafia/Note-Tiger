@@ -10,6 +10,7 @@ Built for Shadowrun, and it works for any game played over Discord voice.
 - 🍕 Keeps off-topic table talk out of the recap. It stays in the transcript (dimmed), and the best jokes can still make **Best Lines**
 - 🐿️ **Squirrel-o-meter**: how much of the night was actually playing vs. going off on tangents, and who the biggest squirrel was
 - 🌐 **Player website**: every session published to a password-protected site (free, on GitHub Pages) where players read recaps and color-coded transcripts on any device
+- 🕵️ **Contacts & loose ends**: every recap updates a roster of the NPCs you've met and a list of open leads, debts and threats (`/campaign`, the Campaign tab, and the player website)
 - 📚 **Rulebook lookup**: add your game PDFs, then `/game ask` tells you the book, the printed page number and a quick description
 - 🧠 Answers questions about past sessions: *"What did Mr. Johnson offer us for the Ares job?"*
 - 🖥️ A proper Windows app: a Note Tiger window with **Start / Stop bot**, sessions, questions and settings, plus a 🐯 tray icon so you know it's running
@@ -70,7 +71,9 @@ Download this repo (green **Code** button → **Download ZIP**), unzip it **outs
 | `/session stop` | A minute or two later, posts the recap in **#recaps** and the full transcript in **#logs**. Create those two text channels (or pick other names in Settings); if they don't exist, both go to the channel you typed in. |
 | `/ask question:Who was the decker in Redmond?` | Answers from all recorded sessions. |
 | `/recap` | Re-posts the latest recap. |
-| `/game ask question:How does Edge work?` | Looks it up in your rulebook PDFs: book, page and a short description, plus related pages. Add PDFs in Note Tiger → **Library**. `/game books` lists them. |
+| `/game ask question:How does Edge work?` | Looks it up in your rulebook PDFs: book, page and a short description, plus related pages. Add PDFs in Note Tiger → **Library**. `/game books` lists them. Asked during a session, it's also listed under **📖 Rules Calls** in that night's recap. |
+| `/campaign contacts` | Everyone the team has met, with who they are and how they feel about you. Add `name:` for one person's history. |
+| `/campaign threads` | Open loose ends, numbered. `/campaign close number:2 how:Paid him back` ties one up; `/campaign add text:…` adds one. Fix anything else in Note Tiger → **Campaign**. |
 | `/repost` | Posts a session's recap **and** transcript to #recaps / #logs again, marked 🔁 Updated (e.g. after **Rewrite recap**). Also a **Repost to Discord** button on each session in Note Tiger. |
 | `/optout mode:on` | The bot won't record that person's voice. |
 

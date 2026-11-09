@@ -30,6 +30,7 @@ import {
 import { askAI, recapSession, buildArchive, ASK_SYSTEM, AI_LABEL, getProgress } from './ai.js';
 import { publishSite, siteConfigured, siteUrl } from './site.js';
 import { askBooks, listBooks, renderPage } from './library.js';
+import { buildCampaign, addEdit, campaignSummary, logRulesCall, npcKey } from './campaign.js';
 import { SITE_PASSWORD, SITE_SHARE_PASSWORD, LIB_PAGE_IMAGES } from './config.js';
 
 // "🌐 Read it on the website: <link> · 🔑 Password: ||secret||" (the password is a Discord spoiler).
@@ -159,6 +160,14 @@ function listenTo(guild, connection, userId) {
 }
 
 // Discord messages max out at 2000 characters.
+// Loose ends changed by hand: update the player website a little later (changes often come in bursts).
+let siteTimer = null;
+function refreshSiteSoon() {
+  if (!siteConfigured()) return;
+  clearTimeout(siteTimer);
+  siteTimer = setTimeout(() => publishSite({ dirs: [] }).catch((e) => console.error('[website]', e.message)), 15_000);
+}
+
 function splitForDiscord(text, max = 1900) {
   const parts = [];
   let cur = '';
@@ -329,7 +338,8 @@ async function publishSession(guild, channel, dir, meta, recap, { updated = fals
     const allFiles = logPosted ? [] : attachments();
     const recapFiles = allFiles.slice(0, 1);
     const meter = statsText(sessionStats(dir));
-    const text = `${tag}# ${meta.title} — ${meta.date}\n${recap}${meter ? `\n\n${meter}` : ''}${pointer}${siteUrlOk ? websiteLine(siteUrlOk) : ''}`;
+    const tracker = campaignSummary(dir);
+    const text = `${tag}# ${meta.title} — ${meta.date}\n${recap}${meter ? `\n\n${meter}` : ''}${tracker ? `\n\n${tracker}` : ''}${pointer}${siteUrlOk ? websiteLine(siteUrlOk) : ''}`;
     if (recapChannel) {
       try { await sendLong(recapChannel, text, recapFiles); recapPosted = recapChannel; }
       catch (err) {
@@ -481,6 +491,15 @@ const commands = [
     .addSubcommand((s) => s.setName('ask').setDescription('Ask the rulebooks: get the book, page and a quick description')
       .addStringOption((o) => o.setName('question').setDescription('e.g. "How does Edge work?" or "Ares Predator"').setRequired(true)))
     .addSubcommand((s) => s.setName('books').setDescription('List the rulebooks I can search')),
+  new SlashCommandBuilder().setName('campaign').setDescription('Contacts and loose ends from your sessions')
+    .addSubcommand((s) => s.setName('contacts').setDescription('Everyone the team has met (or details on one person)')
+      .addStringOption((o) => o.setName('name').setDescription('Show one contact, e.g. "Mr. Johnson"')))
+    .addSubcommand((s) => s.setName('threads').setDescription('Open loose ends: leads, debts, promises, threats'))
+    .addSubcommand((s) => s.setName('close').setDescription('Mark a loose end as dealt with')
+      .addIntegerOption((o) => o.setName('number').setDescription('Its number in /campaign threads').setRequired(true).setMinValue(1))
+      .addStringOption((o) => o.setName('how').setDescription('How it was settled (optional)')))
+    .addSubcommand((s) => s.setName('add').setDescription('Add a loose end by hand')
+      .addStringOption((o) => o.setName('text').setDescription('e.g. "We still owe Sticks 5,000¥"').setRequired(true))),
   new SlashCommandBuilder().setName('ask').setDescription('Ask about past sessions')
     .addStringOption((o) => o.setName('question').setDescription('e.g. "What did Mr. Johnson offer us for the Ares job?"').setRequired(true)),
 ].map((c) => c.toJSON());
@@ -574,7 +593,8 @@ client.on('interactionCreate', async (interaction) => {
         catch (err) { return interaction.editReply(err.message); }
       }
       const meter = statsText(sessionStats(s.dir));
-      const parts = splitForDiscord(`# ${s.title} — ${s.date}\n${recap}${meter ? `\n\n${meter}` : ''}${siteConfigured() ? websiteLine() : ''}`);
+      const tracker = campaignSummary(s.dir);
+      const parts = splitForDiscord(`# ${s.title} — ${s.date}\n${recap}${meter ? `\n\n${meter}` : ''}${tracker ? `\n\n${tracker}` : ''}${siteConfigured() ? websiteLine() : ''}`);
       await interaction.editReply(parts[0]);
       for (const p of parts.slice(1)) await interaction.followUp(p);
       return;
@@ -591,6 +611,12 @@ client.on('interactionCreate', async (interaction) => {
       const question = interaction.options.getString('question');
       await interaction.deferReply();
       const { answer, cited } = await askBooks(question);
+      // Asked during a session: it goes into that session's recap under Rules Calls.
+      const rec = live.get(gid);
+      if (rec && cited !== undefined) {
+        try { logRulesCall(rec.dir, { by: speakerLabel(gid, interaction.member), question, answer, cited: cited ? { title: cited.title, page: cited.pageLabel } : null }); }
+        catch (err) { console.error('[rules calls]', err.message); }
+      }
       // A picture of the main page it cites, so everyone can read the actual rules and tables.
       let files = [];
       if (cited && LIB_PAGE_IMAGES) {
@@ -606,6 +632,52 @@ client.on('interactionCreate', async (interaction) => {
       await interaction.editReply({ content: parts[0], files: parts.length === 1 ? files : [] });
       for (let i = 1; i < parts.length; i++) await interaction.followUp({ content: parts[i], files: i === parts.length - 1 ? files : [] });
       return;
+    }
+
+    if (commandName === 'campaign') {
+      const sub = interaction.options.getSubcommand();
+      const reply = async (text, opts = {}) => {
+        const parts = splitForDiscord(text);
+        await interaction.reply({ content: parts[0], ...opts });
+        for (const p of parts.slice(1)) await interaction.followUp({ content: p, ...opts });
+      };
+      const c = buildCampaign(gid);
+      if (sub === 'contacts') {
+        const name = interaction.options.getString('name');
+        if (name) {
+          const k = npcKey(name);
+          const hit = k && (c.contacts.find((x) => x.key === k) || c.contacts.find((x) => x.key.includes(k) || k.includes(x.key)));
+          if (!hit) return interaction.reply({ content: `I don't have anyone called **${name}**. Try \`/campaign contacts\` for the full list.`, flags: MessageFlags.Ephemeral });
+          const hist = hit.history.map((h) => `• *${h.title} (${h.date}):* ${h.text}`).join('\n');
+          return reply(`🕵️ **${hit.name}**${hit.who ? ` — ${hit.who}` : ''}\n` +
+            `${hit.attitude ? `Attitude: **${hit.attitude}**\n` : ''}First met: ${hit.first?.title ?? '?'} (${hit.first?.date ?? '?'})` +
+            `${hist ? `\n\n${hist}` : ''}`);
+        }
+        if (!c.contacts.length) return interaction.reply({ content: 'No contacts yet. They\'re picked up from each session\'s recap.', flags: MessageFlags.Ephemeral });
+        const list = c.contacts.map((x) => `• **${x.name}**${x.who ? ` — ${x.who}` : ''}${x.attitude ? ` · *${x.attitude}*` : ''}`).join('\n');
+        return reply(`🕵️ **Contacts & NPCs (${c.contacts.length})**\n${list}\n*Details: \`/campaign contacts name:<name>\`*`);
+      }
+      if (sub === 'threads') {
+        if (!c.open.length && !c.closed.length) return interaction.reply({ content: 'No loose ends yet. They\'re picked up from each session\'s recap, or add one with `/campaign add`.', flags: MessageFlags.Ephemeral });
+        const open = c.open.map((t) => `**${t.n}.** ${t.text} *(${t.opened?.title ?? 'added by hand'})*`).join('\n') || '*Nothing open. Clean slate, chummer.*';
+        const done = c.closed.slice(0, 5).map((t) => `~~${t.text}~~${t.how ? ` — ${t.how}` : ''}`).join('\n');
+        return reply(`🧵 **Loose ends (${c.open.length} open)**\n${open}${done ? `\n\n✅ **Recently tied up**\n${done}` : ''}\n*Done with one? \`/campaign close number:<n>\`*`);
+      }
+      if (sub === 'close') {
+        const n = interaction.options.getInteger('number');
+        const t = c.open.find((x) => x.n === n);
+        if (!t) return interaction.reply({ content: `There's no open loose end number ${n}. Check \`/campaign threads\`.`, flags: MessageFlags.Ephemeral });
+        const how = interaction.options.getString('how') || '';
+        addEdit(gid, { type: 'thread-close', id: t.id, how, by: speakerLabel(gid, interaction.member) });
+        refreshSiteSoon();
+        return interaction.reply(`✅ Tied up: ~~${t.text}~~${how ? ` — ${how}` : ''}`);
+      }
+      if (sub === 'add') {
+        const text = interaction.options.getString('text').trim().slice(0, 250);
+        addEdit(gid, { type: 'thread-add', text, by: speakerLabel(gid, interaction.member) });
+        refreshSiteSoon();
+        return interaction.reply(`🧵 Added loose end: ${text}`);
+      }
     }
 
     if (commandName === 'repost') {
