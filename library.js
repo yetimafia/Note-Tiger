@@ -117,9 +117,7 @@ function chunkPage(text, size = 900, overlap = 150) {
   return out;
 }
 
-async function indexBook(file) {
-  const stat = fs.statSync(file);
-  const key = bookKey(file, stat);
+async function openPdf(file, { forDrawing = false } = {}) {
   const { getDocument } = await loadPdfjs();
   const base = path.dirname(require.resolve('pdfjs-dist/package.json'));
   const task = getDocument({
@@ -128,9 +126,52 @@ async function indexBook(file) {
     // pdf.js wants forward slashes and a trailing slash, even on Windows.
     cMapUrl: path.join(base, 'cmaps').replace(/\\/g, '/') + '/', cMapPacked: true,
     standardFontDataUrl: path.join(base, 'standard_fonts').replace(/\\/g, '/') + '/',
+    wasmUrl: path.join(base, 'wasm').replace(/\\/g, '/') + '/',
     isEvalSupported: false, disableFontFace: true, useSystemFonts: false,
   });
-  const doc = await task.promise;
+  return { task, doc: await task.promise };
+}
+
+// Draws one page of a book as a PNG picture (for Discord and the Library tab).
+// pdfPage is the PDF's own page number (1 = first page of the file).
+export async function renderPage(key, pdfPage, width = 1100) {
+  const book = listBooks().find((b) => b.key === key);
+  if (!book) throw new Error('Book not found.');
+  const { task, doc } = await openPdf(path.join(LIB_DIR, book.file), { forDrawing: true });
+  try {
+    if (pdfPage < 1 || pdfPage > doc.numPages) throw new Error('That page doesn\'t exist.');
+    const page = await doc.getPage(pdfPage);
+    const base = page.getViewport({ scale: 1 });
+    const viewport = page.getViewport({ scale: Math.min(3, width / base.width) });
+    const { createCanvas } = await import('@napi-rs/canvas');
+    const canvas = createCanvas(Math.ceil(viewport.width), Math.ceil(viewport.height));
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    await page.render({ canvasContext: ctx, canvas, viewport }).promise;
+    page.cleanup();
+    return canvas.toBuffer('image/png');
+  } finally {
+    await task.destroy();
+  }
+}
+
+// The page an answer is mainly about: the first page it cites, matched to a search hit.
+export function citedHit(answer, hits) {
+  const m = String(answer).match(/(?:\bp\.\s*(\d+)|PDF page (\d+))/i);
+  if (m) {
+    const n = Number(m[1] || m[2]);
+    const byPrinted = m[1] && hits.find((h) => h.printed === n);
+    const byPdf = m[2] && hits.find((h) => h.page === n);
+    if (byPrinted || byPdf) return byPrinted || byPdf;
+  }
+  return hits[0] || null;
+}
+
+async function indexBook(file) {
+  const stat = fs.statSync(file);
+  const key = bookKey(file, stat);
+  const { task, doc } = await openPdf(file);
   const info = await doc.getMetadata().catch(() => null);
   const metaTitle = String(info?.info?.Title || '').trim();
   const title = metaTitle && metaTitle.length > 3 && !/untitled|microsoft|\.indd|\.pdf$/i.test(metaTitle) ? metaTitle : niceTitle(file);
@@ -271,7 +312,8 @@ export async function askBooks(question) {
   if (!hits.length) return { answer: `I couldn't find anything about that in your books (${books.length} indexed).`, hits: [] };
   const excerpts = hits.map((h, i) => `[${i + 1}] ${h.title}, ${h.pageLabel}:\n${h.text.slice(0, 1400)}`).join('\n\n');
   const answer = await askAI(RULES_SYSTEM, `QUESTION: ${question}\n\nEXCERPTS:\n${excerpts}`, 600);
-  return { answer, hits: hits.map(({ title, pageLabel, page, book }) => ({ title, pageLabel, page, book })) };
+  const slim = hits.map(({ title, pageLabel, page, printed, book }) => ({ title, pageLabel, page, printed, book }));
+  return { answer, hits: slim, cited: citedHit(answer, slim) };
 }
 
 // Saves an uploaded PDF into the library (name made safe), then indexes it.

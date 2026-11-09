@@ -10,7 +10,7 @@ import { listSessions, readSession, sessionDir, knownGuilds, transcriptHtml } fr
 import { recapSession, askArchive, ollamaStatus, refreshOllama, AI_LABEL, getProgress } from './ai.js';
 import { startWeb } from './web.js';
 import { publishSite, siteStatus, siteConfigured } from './site.js';
-import { LIB_DIR, listBooks, syncLibrary, libraryProgress, addBook, removeBook, askBooks } from './library.js';
+import { LIB_DIR, listBooks, syncLibrary, libraryProgress, addBook, removeBook, askBooks, renderPage } from './library.js';
 
 const RESTART_CODE = 75; // the launcher restarts the manager when it exits with this code
 
@@ -188,6 +188,7 @@ startWeb({
   addBook(name, buffer) { return addBook(name, buffer); },
   removeBook(key) { removeBook(key); },
   askBooks(question) { return askBooks(question); },
+  renderPage(key, page) { return renderPage(key, page); },
   reindexLibrary() { syncLibrary().catch((e) => console.error('[library]', e.message)); },
   openLibraryFolder() {
     const cmd = process.platform === 'win32' ? `explorer "${LIB_DIR}"` : process.platform === 'darwin' ? `open "${LIB_DIR}"` : `xdg-open "${LIB_DIR}"`;

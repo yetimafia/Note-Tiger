@@ -29,8 +29,8 @@ import {
 } from './store.js';
 import { askAI, recapSession, buildArchive, ASK_SYSTEM, AI_LABEL, getProgress } from './ai.js';
 import { publishSite, siteConfigured, siteUrl } from './site.js';
-import { askBooks, listBooks } from './library.js';
-import { SITE_PASSWORD, SITE_SHARE_PASSWORD } from './config.js';
+import { askBooks, listBooks, renderPage } from './library.js';
+import { SITE_PASSWORD, SITE_SHARE_PASSWORD, LIB_PAGE_IMAGES } from './config.js';
 
 // "🌐 Read it on the website: <link> · 🔑 Password: ||secret||" (the password is a Discord spoiler).
 function websiteLine(url = siteUrl(), withPassword = SITE_SHARE_PASSWORD) {
@@ -590,10 +590,21 @@ client.on('interactionCreate', async (interaction) => {
       }
       const question = interaction.options.getString('question');
       await interaction.deferReply();
-      const { answer, hits } = await askBooks(question);
+      const { answer, cited } = await askBooks(question);
+      // A picture of the main page it cites, so everyone can read the actual rules and tables.
+      let files = [];
+      if (cited && LIB_PAGE_IMAGES) {
+        try {
+          const png = await renderPage(cited.book, cited.page);
+          const name = `${cited.title} ${cited.pageLabel}`.replace(/[^\w .-]+/g, '').replace(/\s+/g, '_').slice(0, 80);
+          files = [new AttachmentBuilder(png, { name: `${name}.png` })];
+        } catch (err) {
+          console.error('[library] page picture:', err.message);
+        }
+      }
       const parts = splitForDiscord(`> 📖 ${question}\n${answer}`);
-      await interaction.editReply(parts[0]);
-      for (const p of parts.slice(1)) await interaction.followUp(p);
+      await interaction.editReply({ content: parts[0], files: parts.length === 1 ? files : [] });
+      for (let i = 1; i < parts.length; i++) await interaction.followUp({ content: parts[i], files: i === parts.length - 1 ? files : [] });
       return;
     }
 

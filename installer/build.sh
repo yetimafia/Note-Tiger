@@ -33,8 +33,8 @@ for d in "$STAGE"/app/node_modules/onnxruntime-node/bin/napi-v*/; do
   rm -rf "$d/darwin" "$d/linux" "$d/win32/arm64"
 done
 rm -rf "$STAGE"/app/node_modules/@types
-# PDF reader: only the Node build, fonts and character maps are needed (no browser viewer, no canvas rendering).
-rm -rf "$STAGE"/app/node_modules/pdfjs-dist/{web,types,build,image_decoders,webpack.mjs} "$STAGE"/app/node_modules/@napi-rs
+# PDF reader: only the Node build, fonts, character maps and wasm are needed (no browser viewer).
+rm -rf "$STAGE"/app/node_modules/pdfjs-dist/{web,types,build,image_decoders,webpack.mjs}
 # Windows ships an older onnxruntime.dll in System32. Put the speech engine's own DLLs next to node.exe,
 # which Windows searches first, so the right version is always loaded.
 cp "$STAGE"/app/node_modules/onnxruntime-node/bin/napi-v6/win32/x64/*.dll "$STAGE/runtime/"

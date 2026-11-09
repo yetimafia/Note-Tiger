@@ -210,6 +210,10 @@
     <div id="libProg"></div>
     <div class="card"><h2>Books</h2><div id="libBooks"><div class="empty">Loading…</div></div></div>
     <div class="card">
+      <label class="switch"><input type="checkbox" id="libImages"> Attach a picture of the page to <code>/game ask</code> answers in Discord</label>
+      <div class="hint">Shows the actual page (rules text, tables) under the answer. Saved right away.</div>
+    </div>
+    <div class="card">
       <h2>Try a lookup</h2>
       <div class="row"><input type="text" id="libQ" placeholder="e.g. How does Edge work?  ·  Ares Predator  ·  astral projection" style="flex:1"><button class="btn" id="libAsk">Look it up</button></div>
       <div id="libOut"></div>
@@ -514,6 +518,7 @@ function openLog() {
 let libTimer = null;
 async function loadLibrary() {
   clearTimeout(libTimer);
+  api('/api/settings').then((st) => { $('#libImages').checked = st.LIB_PAGE_IMAGES !== 'false'; }).catch(() => {});
   const lib = await api('/api/library').catch((e) => { toast(e.message); return null; });
   if (!lib) return;
   const p = lib.progress;
@@ -544,6 +549,16 @@ async function uploadBooks(files) {
   }
   loadLibrary();
 }
+$('#libImages').onchange = async (e) => {
+  await api('/api/settings', { method: 'POST', body: { LIB_PAGE_IMAGES: e.target.checked ? 'true' : 'false' } }).catch((err) => toast(err.message));
+  // The bot reads this setting when it starts; restart it quietly if it's running.
+  const recording = status?.guilds?.some((g) => g.recording);
+  if (status?.botState === 'running' && !recording) {
+    await api('/api/bot/stop', { method: 'POST', body: {} }).catch(() => {});
+    await api('/api/bot/start', { method: 'POST', body: {} }).catch(() => {});
+  }
+  toast(`Page pictures ${e.target.checked ? 'on' : 'off'}.${recording ? ' Takes effect the next time the bot starts (not interrupting your recording).' : ''}`);
+};
 $('#libAdd').onclick = () => $('#libFile').click();
 $('#libFile').onchange = (e) => { uploadBooks([...e.target.files]); e.target.value = ''; };
 $('#libOpen').onclick = () => api('/api/library/open', { method: 'POST', body: {} }).catch((e) => toast(e.message));
@@ -557,6 +572,8 @@ $('#libAsk').onclick = async () => {
   try {
     const r = await api('/api/library/ask', { method: 'POST', body: { question: q } });
     $('#libOut').innerHTML = `<div class="answer recap">${md(r.answer)}</div>` +
+      (r.cited ? `<div style="margin-top:12px"><div class="hint" style="margin-bottom:6px">📄 ${esc(r.cited.title)}, ${esc(r.cited.pageLabel)}</div>
+        <img src="/api/library/page?book=${encodeURIComponent(r.cited.book)}&page=${r.cited.page}" alt="Page picture" style="max-width:100%;border-radius:8px;border:1px solid var(--line);background:#fff" loading="lazy"></div>` : '') +
       (r.hits.length ? `<div class="hint" style="margin-top:8px">Searched pages: ${r.hits.map((h) => `${esc(h.title)} ${esc(h.pageLabel)}`).join(' · ')}</div>` : '');
   } catch (err) { $('#libOut').innerHTML = `<div class="banner err" style="margin-top:12px">${esc(err.message)}</div>`; }
   btn.disabled = false;

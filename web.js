@@ -26,6 +26,7 @@ export const SETTINGS = [
   { key: 'GITHUB_TOKEN', secret: true },
   { key: 'SITE_PASSWORD', secret: true },
   { key: 'SITE_SHARE_PASSWORD' },
+  { key: 'LIB_PAGE_IMAGES' },
 ];
 
 function readEnvLines() {
@@ -135,6 +136,12 @@ export function startWeb(ctx, port) {
       // Rulebook library
       if (parts[1] === 'library') {
         if (!parts[2] && req.method === 'GET') return send(res, 200, ctx.library());
+        // GET /api/library/page?book=<key>&page=<pdf page>  -> PNG picture of that page
+        if (parts[2] === 'page' && req.method === 'GET') {
+          const png = await ctx.renderPage(String(url.searchParams.get('book')), Number(url.searchParams.get('page')));
+          res.writeHead(200, { 'Content-Type': 'image/png', 'Cache-Control': 'max-age=3600' });
+          return res.end(png);
+        }
         if (parts[2] === 'ask' && req.method === 'POST') {
           const { question } = await readBody(req);
           if (!question) return send(res, 400, { error: 'Type a question.' });

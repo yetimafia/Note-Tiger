@@ -37,6 +37,8 @@ export const SITE_BRANCH = e.SITE_BRANCH || 'gh-pages';
 export const GITHUB_TOKEN = e.GITHUB_TOKEN || '';
 // Put the website password (hidden behind a spoiler) under each recap in Discord.
 export const SITE_SHARE_PASSWORD = e.SITE_SHARE_PASSWORD !== 'false';
+// Attach a picture of the cited rulebook page to /game ask answers.
+export const LIB_PAGE_IMAGES = e.LIB_PAGE_IMAGES !== 'false';
 // Discord role(s) that mark the game master / storyteller (comma-separated, not case-sensitive).
 export const GM_ROLES = (e.GM_ROLE || 'Game Master, GM, Storyteller, DM')
   .split(',').map((r) => r.trim().toLowerCase()).filter(Boolean);
