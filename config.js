@@ -29,6 +29,12 @@ export const SKIP_OPENING_RECAP = e.SKIP_OPENING_RECAP !== 'false';
 const channelName = (v, fallback) => (v ?? fallback).replace(/^#/, '').trim().toLowerCase();
 export const RECAP_CHANNEL = channelName(e.RECAP_CHANNEL, 'recaps');
 export const LOG_CHANNEL = channelName(e.LOG_CHANNEL, 'logs');
+// Player website (GitHub Pages, encrypted with the group password).
+export const SITE_ENABLED = e.SITE_ENABLED === 'true';
+export const SITE_PASSWORD = e.SITE_PASSWORD || '';
+export const SITE_REPO = (e.SITE_REPO || '').trim().replace(/^https?:\/\/github\.com\//, '').replace(/\.git$|\/$/g, '');
+export const SITE_BRANCH = e.SITE_BRANCH || 'gh-pages';
+export const GITHUB_TOKEN = e.GITHUB_TOKEN || '';
 // Discord role(s) that mark the game master / storyteller (comma-separated, not case-sensitive).
 export const GM_ROLES = (e.GM_ROLE || 'Game Master, GM, Storyteller, DM')
   .split(',').map((r) => r.trim().toLowerCase()).filter(Boolean);

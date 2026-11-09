@@ -254,6 +254,27 @@
       <div class="hint">Runs on this computer for free. A new model downloads on next start.</div>
     </div>
 
+    <div class="card">
+      <h2>🌐 Player website</h2>
+      <p class="hint" style="margin-top:0">Publishes every session to a free website (GitHub Pages) so players can read recaps and color-coded transcripts on any device. Everything is encrypted with the group password, so only people who know it can read anything.</p>
+      <label class="switch"><input type="checkbox" id="SITE_ENABLED"> Publish sessions to the player website</label>
+      <div id="siteBox">
+        <label for="SITE_REPO">GitHub repository</label>
+        <input type="text" id="SITE_REPO" placeholder="yourname/Note-Tiger">
+        <div class="hint">Where the website lives (it uses its own <code>gh-pages</code> branch). Your Note-Tiger repo works.</div>
+        <label for="GITHUB_TOKEN">GitHub token</label>
+        <input type="password" id="GITHUB_TOKEN" autocomplete="off">
+        <div class="hint"><a href="https://github.com/settings/personal-access-tokens/new" target="_blank" style="color:var(--accent2)">Create a fine-grained token</a>: Repository access → <b>Only select repositories</b> → your repo; Permissions → <b>Contents: Read and write</b> and <b>Pages: Read and write</b>. Leave empty to keep the saved one.</div>
+        <label for="SITE_PASSWORD">Group password</label>
+        <input type="password" id="SITE_PASSWORD" autocomplete="new-password">
+        <div class="hint">What players type to open the site. At least 8 characters; a few words is best (e.g. <i>redmond barrens chummer</i>). Changing it re-encrypts everything, and the old password stops working.</div>
+        <div class="row" style="margin-top:12px">
+          <button class="btn ghost" id="publishAllBtn" type="button">Publish all sessions now</button>
+          <span class="hint" id="siteHint"></span>
+        </div>
+      </div>
+    </div>
+
     <div class="row"><button class="btn" id="saveBtn">Save &amp; restart bot</button><span class="hint" id="saveHint"></span></div>
   </section>
 </main>
@@ -397,11 +418,13 @@ function renderHome() {
   $('#homeBanners').innerHTML = banners;
 
   const totalSessions = s.guilds.reduce((n, g) => n + g.sessions, 0);
-  $('#homeStats').innerHTML = [
+  const site = s.site;
+  const siteRow = site?.enabled && site.configured && site.url ? [['Player website', `${site.published.length} published`, site.url]] : [];
+  $('#homeStats').innerHTML = [...siteRow.map(([l, v, u]) => `<div class="card stat"><div class="label">${l}</div><div class="value"><a href="${esc(u)}" target="_blank" style="color:var(--accent2)">${esc(v)} ↗</a></div></div>`), ...[
     ['Recap AI', s.ai + (s.usingClaude ? '' : s.ollama === 'ready' ? ' ✓' : ' ⚠')],
     ['Speech-to-text', { idle: 'Waiting', loading: 'Downloading…', ready: 'Ready ✓', error: 'Error ⚠' }[s.speech.state]],
     ['Sessions recorded', totalSessions],
-  ].map(([l, v]) => `<div class="card stat"><div class="label">${l}</div><div class="value">${esc(v)}</div></div>`).join('');
+  ].map(([l, v]) => `<div class="card stat"><div class="label">${l}</div><div class="value">${esc(v)}</div></div>`)].join('');
 
   $('#homeGuilds').innerHTML = s.guilds.length
     ? s.guilds.map((g) => `<div class="row" style="justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--line)">
@@ -577,6 +600,19 @@ function syncAiBoxes() {
 }
 document.querySelectorAll('input[name=ai]').forEach((r) => r.addEventListener('change', syncAiBoxes));
 
+$('#SITE_ENABLED').addEventListener('change', () => { $('#siteBox').hidden = !$('#SITE_ENABLED').checked; });
+$('#publishAllBtn').addEventListener('click', async (e) => {
+  if (loadedSettings && (!loadedSettings.GITHUB_TOKEN.set || !loadedSettings.SITE_PASSWORD.set || loadedSettings.SITE_ENABLED !== 'true')) {
+    toast('Fill these in and click Save & restart first, then publish.'); return;
+  }
+  e.target.disabled = true; $('#siteHint').textContent = 'Encrypting and publishing… (first time can take a minute)';
+  try {
+    const r = await api('/api/site/publish', { method: 'POST', body: { all: true } });
+    $('#siteHint').innerHTML = `Published ${r.published} session${r.published === 1 ? '' : 's'} to <a href="${esc(r.url)}" target="_blank" style="color:var(--accent2)">${esc(r.url)}</a>. GitHub can take a minute or two to update the site.`;
+  } catch (err) { $('#siteHint').textContent = ''; toast(err.message); }
+  e.target.disabled = false;
+});
+
 let loadedSettings = null;
 async function loadSettings() {
   const s = loadedSettings = await api('/api/settings');
@@ -590,6 +626,13 @@ async function loadSettings() {
   $('#GM_ROLE').value = s.GM_ROLE || 'Game Master, GM, Storyteller, DM';
   $('#SEPARATE_TABLE_TALK').checked = s.SEPARATE_TABLE_TALK !== 'false';
   $('#SKIP_OPENING_RECAP').checked = s.SKIP_OPENING_RECAP !== 'false';
+  $('#SITE_ENABLED').checked = s.SITE_ENABLED === 'true';
+  $('#SITE_REPO').value = s.SITE_REPO || '';
+  $('#GITHUB_TOKEN').value = ''; $('#GITHUB_TOKEN').placeholder = s.GITHUB_TOKEN.set ? '•••••••• saved' : 'github_pat_…';
+  $('#SITE_PASSWORD').value = ''; $('#SITE_PASSWORD').placeholder = s.SITE_PASSWORD.set ? '•••••••• saved' : 'Choose a group password';
+  $('#siteBox').hidden = !$('#SITE_ENABLED').checked;
+  const url = status?.site?.url;
+  $('#siteHint').innerHTML = url && status.site.configured ? `Site: <a href="${esc(url)}" target="_blank" style="color:var(--accent2)">${esc(url)}</a>` : '';
   const w = $('#WHISPER_MODEL');
   if (s.WHISPER_MODEL && ![...w.options].some((o) => o.value === s.WHISPER_MODEL)) w.add(new Option(s.WHISPER_MODEL, s.WHISPER_MODEL));
   w.value = s.WHISPER_MODEL || 'onnx-community/whisper-small.en';
@@ -607,6 +650,10 @@ $('#saveBtn').addEventListener('click', async () => {
     WHISPER_MODEL: $('#WHISPER_MODEL').value,
     SEPARATE_TABLE_TALK: $('#SEPARATE_TABLE_TALK').checked ? 'true' : 'false',
     SKIP_OPENING_RECAP: $('#SKIP_OPENING_RECAP').checked ? 'true' : 'false',
+    SITE_ENABLED: $('#SITE_ENABLED').checked ? 'true' : 'false',
+    SITE_REPO: $('#SITE_REPO').value.trim(),
+    GITHUB_TOKEN: $('#GITHUB_TOKEN').value.trim(),
+    SITE_PASSWORD: $('#SITE_PASSWORD').value,
     LOG_CHANNEL: $('#LOG_CHANNEL').value.replace(/^#/, '').trim() || 'logs',
     RECAP_CHANNEL: $('#RECAP_CHANNEL').value.replace(/^#/, '').trim() || 'recaps',
     GM_ROLE: $('#GM_ROLE').value.trim() || 'Game Master, GM, Storyteller, DM',
@@ -615,6 +662,7 @@ $('#saveBtn').addEventListener('click', async () => {
   if (ai === 'local') body.clear_ANTHROPIC_API_KEY = true; // no key = local AI
   if (ai === 'claude' && !body.ANTHROPIC_API_KEY && !loadedSettings.ANTHROPIC_API_KEY.set) { toast('Paste your Claude API key first.'); return; }
   if (!body.DISCORD_TOKEN && !loadedSettings.DISCORD_TOKEN.set) { toast('Paste your Discord bot token first.'); return; }
+  if (body.SITE_PASSWORD && body.SITE_PASSWORD.length < 8) { toast('The group password needs at least 8 characters.'); return; }
   const btn = $('#saveBtn'); btn.disabled = true;
   try {
     await api('/api/settings', { method: 'POST', body });

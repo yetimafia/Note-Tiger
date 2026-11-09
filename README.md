@@ -9,6 +9,7 @@ Built for Shadowrun, and it works for any game played over Discord voice.
 - 🎭 Knows who the game master is (by Discord role) and labels their lines as **Narrator**, the **NPC** they're voicing, or the GM speaking out of character
 - 🍕 Keeps off-topic table talk out of the recap. It stays in the transcript (dimmed), and the best jokes can still make **Best Lines**
 - 🐿️ **Squirrel-o-meter**: how much of the night was actually playing vs. going off on tangents, and who the biggest squirrel was
+- 🌐 **Player website**: every session published to a password-protected site (free, on GitHub Pages) where players read recaps and color-coded transcripts on any device
 - 🧠 Answers questions about past sessions: *"What did Mr. Johnson offer us for the Ares job?"*
 - 🖥️ A proper Windows app: a Note Tiger window with **Start / Stop bot**, sessions, questions and settings, plus a 🐯 tray icon so you know it's running
 - 💸 **Free by default:** speech-to-text and the recap AI can both run on your own PC. Nothing gets uploaded.
@@ -76,6 +77,21 @@ In the **control panel** you can also read every recap and transcript, download 
 > **Tell your group before you record.** Everyone in the voice channel is transcribed.
 
 ---
+
+## Player website (optional)
+
+Note Tiger can publish every session to a website your players can open on any phone or computer: recaps, the squirrel-o-meter, and searchable color-coded transcripts.
+
+**Private by design:** everything is encrypted with a group password (AES-256-GCM, PBKDF2 key) before it leaves your PC. GitHub and anyone who stumbles on the link only see scrambled data; the page decrypts it in the player's browser after they type the password.
+
+Setup (once):
+1. [Create a fine-grained GitHub token](https://github.com/settings/personal-access-tokens/new): *Repository access* → **Only select repositories** → your Note-Tiger repo. *Permissions* → **Contents: Read and write** and **Pages: Read and write**.
+2. In Note Tiger → **Settings → Player website**: tick the box, enter your repo (e.g. `yourname/Note-Tiger`), paste the token, choose a group password → **Save & restart**.
+3. Click **Publish all sessions now**. Share the link (e.g. `https://yourname.github.io/Note-Tiger/`) and the password with your group.
+
+After that, every session is published automatically when it ends (and again after **Rewrite recap** or **Repost**), and the Discord posts link to it.
+
+> Changing the password re-encrypts everything and the old one stops working. Older encrypted copies stay in the repo's history, still locked with the old password.
 
 ## Troubleshooting
 

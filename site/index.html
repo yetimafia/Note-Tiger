@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Note Tiger · Session Archive</title>
+<link rel="icon" href="tiger.png">
+<style>
+  :root {
+    --bg: #1e1f22; --panel: #2b2d31; --panel2: #313338; --line: #3f4147;
+    --text: #dbdee1; --bright: #f2f3f5; --dim: #949ba4; --accent: #f5a524; --accent2: #3dd6c6;
+    --red: #ff6b7a; --green: #7bd88f;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.5 "gg sans", "Segoe UI", system-ui, -apple-system, sans-serif; }
+  a { color: var(--accent2); }
+  button { font: inherit; cursor: pointer; }
+  .wrap { max-width: 980px; margin: 0 auto; padding: 0 18px 60px; }
+  header { position: sticky; top: 0; z-index: 5; background: rgba(30,31,34,.92); backdrop-filter: blur(8px); border-bottom: 1px solid var(--line); }
+  header .wrap { display: flex; align-items: center; gap: 12px; padding-top: 12px; padding-bottom: 12px; }
+  .logo { font-weight: 800; font-size: 18px; color: var(--bright); white-space: nowrap; cursor: pointer; }
+  .logo span { color: var(--accent); }
+  .campaign { color: var(--dim); font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .spacer { flex: 1; }
+  .ghost { background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 6px 12px; }
+  .ghost:hover { background: var(--panel2); }
+
+  /* lock screen */
+  .lock { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 20px; }
+  .lockbox { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 30px; width: 100%; max-width: 380px; text-align: center; }
+  .lockbox .big { font-size: 46px; }
+  .lockbox h1 { color: var(--bright); font-size: 22px; margin: 6px 0 4px; }
+  .lockbox p { color: var(--dim); margin: 0 0 18px; font-size: 14px; }
+  .lockbox input[type=password] { width: 100%; padding: 11px 12px; border-radius: 8px; border: 1px solid var(--line); background: var(--bg); color: var(--text); font: inherit; }
+  .lockbox input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+  .lockbox .go { width: 100%; margin-top: 12px; padding: 11px; border: 0; border-radius: 8px; background: var(--accent); color: #1a1205; font-weight: 700; }
+  .lockbox .go:disabled { opacity: .6; cursor: wait; }
+  .lockbox label { display: flex; gap: 8px; align-items: center; justify-content: center; margin-top: 12px; color: var(--dim); font-size: 13px; }
+  .err { color: var(--red); font-size: 14px; margin-top: 10px; min-height: 20px; }
+
+  /* list */
+  h2.page { color: var(--bright); font-size: 22px; margin: 22px 0 4px; }
+  .sub { color: var(--dim); margin: 0 0 16px; font-size: 14px; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; cursor: pointer; transition: border-color .15s, transform .15s; }
+  .card:hover { border-color: var(--accent); transform: translateY(-1px); }
+  .card .t { color: var(--bright); font-weight: 700; font-size: 16px; }
+  .card .d { color: var(--dim); font-size: 13px; margin: 2px 0 10px; }
+  .dots { display: flex; flex-wrap: wrap; gap: 4px 10px; font-size: 12px; color: var(--dim); margin-top: 8px; }
+  .dots i { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 4px; }
+
+  .bar { display: flex; height: 10px; border-radius: 99px; overflow: hidden; background: var(--bg); }
+  .bar span { display: block; height: 100%; }
+  .meter { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; margin: 14px 0; }
+  .meter .bar { height: 14px; margin: 8px 0; }
+  .legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 13px; color: var(--dim); }
+  .legend b { color: var(--text); }
+  .legend i { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 5px; }
+
+  /* session */
+  .back { margin-top: 18px; }
+  .tabs { display: flex; gap: 6px; margin: 12px 0; flex-wrap: wrap; align-items: center; }
+  .tab { background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 8px 16px; font-weight: 600; }
+  .tab.on { background: var(--accent); color: #1a1205; border-color: var(--accent); }
+  .tools { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin: 6px 0 10px; }
+  .tools input[type=search] { flex: 1; min-width: 180px; padding: 8px 11px; border-radius: 8px; border: 1px solid var(--line); background: var(--panel); color: var(--text); font: inherit; }
+  .tools label { color: var(--dim); font-size: 13px; display: flex; gap: 6px; align-items: center; cursor: pointer; }
+  .recap { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 6px 20px 14px; line-height: 1.65; }
+  .recap h3 { color: var(--bright); margin: 16px 0 6px; font-size: 16px; }
+  .recap ul { padding-left: 22px; margin: 6px 0; }
+  .recap p { margin: 8px 0; }
+  .b { background: var(--panel); border-left: 4px solid; border-radius: 6px; padding: 8px 14px 10px 12px; margin: 5px 0; }
+  .b .n { font-weight: 600; font-size: 14px; margin-bottom: 2px; }
+  .b .ln { padding: 1px 0; }
+  .tm { font: 12px ui-monospace, Consolas, monospace; background: var(--bg); color: var(--dim); border-radius: 4px; padding: 1px 5px; margin-right: 8px; }
+  .b.dim { opacity: .58; }
+  .b.dim .ln { font-style: italic; }
+  .b.note { background: #26282c; }
+  .tag { font-size: 11px; font-weight: 500; color: var(--dim); background: var(--bg); border-radius: 99px; padding: 1px 7px; margin-left: 8px; }
+  mark { background: #6b5310; color: var(--bright); border-radius: 3px; padding: 0 2px; }
+  .hidden-tt .b.tt, .hidden-rc .b.rc { display: none; }
+  .empty { color: var(--dim); text-align: center; padding: 50px 10px; }
+  .spin { width: 26px; height: 26px; border: 3px solid var(--line); border-top-color: var(--accent); border-radius: 50%; animation: r 1s linear infinite; margin: 60px auto; }
+  @keyframes r { to { transform: rotate(360deg); } }
+  footer { color: var(--dim); font-size: 12px; text-align: center; margin-top: 40px; }
+  @media (max-width: 600px) { .campaign { display: none; } .recap { padding: 4px 14px 10px; } }
+</style>
+</head>
+<body>
+<div id="app"></div>
+
+<script>
+// Note Tiger session archive. Everything here is encrypted with the group password (AES-256-GCM,
+// key from PBKDF2-SHA256); it's decrypted in your browser and never sent anywhere.
+const $ = (s, el = document) => el.querySelector(s);
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const app = $('#app');
+let key = null, manifest = null, config = null;
+const cache = new Map();
+
+const b64 = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
+async function deriveKey(password) {
+  const base = await crypto.subtle.importKey('raw', new TextEncoder().encode(password), 'PBKDF2', false, ['deriveKey']);
+  return crypto.subtle.deriveKey({ name: 'PBKDF2', salt: b64(config.salt), iterations: config.iterations, hash: 'SHA-256' },
+    base, { name: 'AES-GCM', length: 256 }, true, ['decrypt']);
+}
+async function decryptFile(url, k = key) {
+  const res = await fetch(url, { cache: 'no-store' });
+  if (!res.ok) throw new Error(`Couldn't load ${url} (${res.status})`);
+  const data = b64((await res.text()).trim());
+  const plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: data.slice(0, 12) }, k, data.slice(12));
+  const text = await new Response(new Blob([plain]).stream().pipeThrough(new DecompressionStream('gzip'))).text();
+  return JSON.parse(text);
+}
+
+// ---------- lock ----------
+function showLock(msg = '') {
+  app.innerHTML = `<div class="lock"><form class="lockbox" id="lockForm">
+    <div class="big">🐯</div><h1>Session Archive</h1>
+    <p>Recaps and color-coded transcripts from our game nights. Enter the group password.</p>
+    <input type="password" id="pw" placeholder="Group password" autocomplete="current-password" autofocus>
+    <button class="go" id="go">Unlock</button>
+    <label><input type="checkbox" id="remember" checked> Remember on this device</label>
+    <div class="err" id="err">${esc(msg)}</div></form></div>`;
+  $('#lockForm').onsubmit = async (e) => {
+    e.preventDefault();
+    const pw = $('#pw').value;
+    if (!pw) return;
+    $('#go').disabled = true; $('#go').textContent = 'Unlocking…'; $('#err').textContent = '';
+    try {
+      const k = await deriveKey(pw);
+      manifest = await decryptFile('data/manifest.enc', k);
+      key = k;
+      if ($('#remember').checked) {
+        try { localStorage.setItem('nt-key-' + config.salt, JSON.stringify(await crypto.subtle.exportKey('jwk', k))); } catch {}
+      }
+      route();
+    } catch (err) {
+      $('#go').disabled = false; $('#go').textContent = 'Unlock';
+      $('#err').textContent = err.name === 'OperationError' ? 'Wrong password. Try again.' : err.message;
+    }
+  };
+}
+
+function lockAgain() {
+  try { localStorage.removeItem('nt-key-' + config.salt); } catch {}
+  key = null; manifest = null; cache.clear(); location.hash = ''; showLock();
+}
+
+// ---------- pages ----------
+const fmtDur = (ms) => { const m = Math.round(ms / 60000); return m >= 60 ? `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, '0')}m` : `${m}m`; };
+const clock = (t) => new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+const niceDate = (d) => { const x = new Date(d + 'T12:00:00'); return isNaN(x) ? d : x.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' }); };
+
+function header() {
+  return `<header><div class="wrap"><div class="logo" onclick="location.hash=''">🐯 Note <span>Tiger</span></div>
+    <div class="campaign">${esc(manifest.campaign || '')}</div><div class="spacer"></div>
+    <button class="ghost" onclick="lockAgain()">Lock</button></div></header>`;
+}
+
+function meterBar(st) {
+  if (!st) return '';
+  return [['#7bd88f', st.gamePct], ['#f5a524', st.squirrelPct], ['#9be7ef', st.recapPct], ['#5c6370', st.quietPct]]
+    .filter(([, p]) => p > 0).map(([c, p]) => `<span style="width:${p}%;background:${c}"></span>`).join('');
+}
+
+function showList() {
+  const sessions = [...manifest.sessions].reverse();
+  app.innerHTML = header() + `<div class="wrap"><h2 class="page">Sessions</h2>
+    <p class="sub">${sessions.length} session${sessions.length === 1 ? '' : 's'} · updated ${esc(new Date(manifest.updated).toLocaleString())}</p>
+    ${sessions.length ? `<div class="cards">${sessions.map((s) => `<div class="card" onclick="location.hash='${s.id}'">
+      <div class="t">${esc(s.title)}</div><div class="d">${esc(niceDate(s.date))} · ${fmtDur(s.stats?.totalMs || 0)}</div>
+      ${s.stats ? `<div class="bar">${meterBar(s.stats)}</div><div class="dots" style="margin-top:6px">🎲 ${s.stats.gamePct}% game · 🐿️ ${s.stats.squirrelPct}% squirrels</div>` : ''}
+      <div class="dots">${(s.people || []).map((p) => `<span><i style="background:${p.color}"></i>${esc(p.name)}</span>`).join('')}</div></div>`).join('')}</div>`
+    : '<div class="empty">No sessions published yet.</div>'}
+    <footer>Note Tiger · encrypted archive</footer></div>`;
+}
+
+function md(text) {
+  const inline = (s) => esc(s).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>').replace(/(^|[^*])\*(?!\s)(.+?)\*/g, '$1<i>$2</i>');
+  let html = '', inList = false;
+  for (const raw of String(text || '').split('\n')) {
+    const line = raw.trimEnd();
+    const li = line.match(/^\s*[-*•]\s+(.*)/);
+    if (li) { if (!inList) { html += '<ul>'; inList = true; } html += `<li>${inline(li[1])}</li>`; continue; }
+    if (inList) { html += '</ul>'; inList = false; }
+    const h = line.match(/^#{1,3}\s+(.*)/) || line.match(/^\*\*([^*]+)\*\*\s*$/);
+    if (h) html += `<h3>${inline(h[1])}</h3>`;
+    else if (line.trim()) html += `<p>${inline(line)}</p>`;
+  }
+  return html + (inList ? '</ul>' : '');
+}
+
+let view = { tab: 'recap', q: '', tt: true, rc: true };
+async function showSession(id) {
+  const meta = manifest.sessions.find((s) => s.id === id);
+  if (!meta) { location.hash = ''; return; }
+  app.innerHTML = header() + '<div class="wrap"><div class="spin"></div></div>';
+  let s = cache.get(id);
+  if (!s) {
+    try { s = await decryptFile(`data/${meta.file}`); cache.set(id, s); }
+    catch (err) { app.innerHTML = header() + `<div class="wrap"><div class="empty">Couldn't open this session: ${esc(err.message)}</div></div>`; return; }
+  }
+  const st = s.stats;
+  const tt = s.entries.filter((e) => e.o).length, rc = s.entries.filter((e) => e.r).length;
+  app.innerHTML = header() + `<div class="wrap">
+    <button class="ghost back" onclick="location.hash=''">← All sessions</button>
+    <h2 class="page">${esc(s.title)}</h2>
+    <p class="sub">${esc(niceDate(s.date))}${s.channel ? ` · ${esc(s.channel)}` : ''} · ${s.entries.length} lines</p>
+    ${st ? `<div class="meter"><b>🐿️ Squirrel-o-meter</b> <span class="sub">· ${fmtDur(st.totalMs)} session</span><div class="bar">${meterBar(st)}</div>
+      <div class="legend">${[['#7bd88f', 'Playing the game', st.gameMs, st.gamePct], ['#f5a524', 'Squirrels', st.squirrelMs, st.squirrelPct], ['#9be7ef', 'Recap of last session', st.recapMs, st.recapPct], ['#5c6370', 'Quiet / breaks', st.quietMs, st.quietPct]]
+        .filter((p) => p[3] > 0).map(([c, l, ms, p]) => `<span><i style="background:${c}"></i>${l} <b>${fmtDur(ms)}</b> (${p}%)</span>`).join('')}</div>
+      ${st.topSquirrels?.length ? `<div class="sub" style="margin:6px 0 0">Biggest squirrels: ${st.topSquirrels.filter((t) => t.ms >= 60000).map((t) => `${esc(t.name)} ${fmtDur(t.ms)}`).join(', ')}</div>` : ''}</div>` : ''}
+    <div class="tabs"><button class="tab" data-t="recap">Recap</button><button class="tab" data-t="transcript">Transcript</button></div>
+    <div id="body"></div></div>`;
+  app.querySelectorAll('.tab').forEach((b) => b.onclick = () => { view.tab = b.dataset.t; render(); });
+  function render() {
+    app.querySelectorAll('.tab').forEach((b) => b.classList.toggle('on', b.dataset.t === view.tab));
+    const body = $('#body');
+    if (view.tab === 'recap') { body.innerHTML = s.recap ? `<div class="recap">${md(s.recap)}</div>` : '<div class="empty">No recap for this session.</div>'; return; }
+    body.innerHTML = `<div class="tools"><input type="search" id="q" placeholder="Search the transcript…" value="${esc(view.q)}">
+      ${tt ? `<label><input type="checkbox" id="tt" ${view.tt ? 'checked' : ''}> Table talk (${tt})</label>` : ''}
+      ${rc ? `<label><input type="checkbox" id="rc" ${view.rc ? 'checked' : ''}> Opening recap (${rc})</label>` : ''}</div><div id="lines"></div>`;
+    const q = $('#q');
+    q.oninput = () => { view.q = q.value; lines(); };
+    if ($('#tt')) $('#tt').onchange = (e) => { view.tt = e.target.checked; lines(); };
+    if ($('#rc')) $('#rc').onchange = (e) => { view.rc = e.target.checked; lines(); };
+    lines();
+  }
+  function lines() {
+    const needle = view.q.trim().toLowerCase();
+    const hl = (t) => { const h = esc(t); if (!needle) return h; const n = esc(needle).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); return h.replace(new RegExp(n, 'gi'), (m) => `<mark>${m}</mark>`); };
+    const shown = s.entries.filter((e) => (view.tt || !e.o) && (view.rc || !e.r) && (!needle || e.x.toLowerCase().includes(needle) || e.s.toLowerCase().includes(needle)));
+    const groups = [];
+    for (const e of shown) {
+      const name = e.k === 'n' ? `📝 Note from ${e.s}` : e.s;
+      const last = groups.at(-1);
+      if (last && last.name === name && last.o === e.o && last.r === e.r && last.k === e.k && !needle) last.lines.push(e);
+      else groups.push({ name, k: e.k, o: e.o, r: e.r, c: e.k === 'n' ? '#C8CCD4' : (e.c || '#C8CCD4'), lines: [e] });
+    }
+    $('#lines').innerHTML = groups.length ? groups.map((g) => `<div class="b ${g.o || g.r ? 'dim' : ''} ${g.k === 'n' ? 'note' : ''}" style="border-left-color:${g.c}">
+      <div class="n" style="color:${g.c}">${esc(g.name)}${g.o ? '<span class="tag">table talk</span>' : g.r ? '<span class="tag">recap of last session</span>' : ''}</div>
+      ${g.lines.map((e) => `<div class="ln"><span class="tm">${clock(e.t)}</span>${hl(e.x)}</div>`).join('')}</div>`).join('')
+      : `<div class="empty">${needle ? 'No lines match your search.' : 'Nothing to show.'}</div>`;
+  }
+  render();
+  window.scrollTo(0, 0);
+}
+
+function route() {
+  if (!key) return showLock();
+  const id = location.hash.slice(1);
+  id ? showSession(id) : showList();
+}
+window.addEventListener('hashchange', route);
+
+(async () => {
+  try {
+    config = await (await fetch('data/config.json', { cache: 'no-store' })).json();
+  } catch {
+    app.innerHTML = '<div class="lock"><div class="lockbox"><div class="big">🐯</div><h1>Nothing here yet</h1><p>No sessions have been published.</p></div></div>';
+    return;
+  }
+  try {
+    const saved = localStorage.getItem('nt-key-' + config.salt);
+    if (saved) {
+      const k = await crypto.subtle.importKey('jwk', JSON.parse(saved), { name: 'AES-GCM' }, true, ['decrypt']);
+      manifest = await decryptFile('data/manifest.enc', k);
+      key = k;
+    }
+  } catch { try { localStorage.removeItem('nt-key-' + config.salt); } catch {} }
+  route();
+})();
+</script>
+</body>
+</html>

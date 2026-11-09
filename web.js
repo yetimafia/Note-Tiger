@@ -21,6 +21,10 @@ export const SETTINGS = [
   { key: 'RECAP_CHANNEL' },
   { key: 'GM_ROLE' },
   { key: 'SKIP_OPENING_RECAP' },
+  { key: 'SITE_ENABLED' },
+  { key: 'SITE_REPO' },
+  { key: 'GITHUB_TOKEN', secret: true },
+  { key: 'SITE_PASSWORD', secret: true },
 ];
 
 function readEnvLines() {
@@ -118,6 +122,12 @@ export function startWeb(ctx, port) {
 
       // POST /api/setup-local-ai  (opens a window that installs Ollama + the model)
       if (parts[1] === 'setup-local-ai' && req.method === 'POST') { ctx.setupLocalAI(); return send(res, 200, { ok: true }); }
+
+      // POST /api/site/publish {all: true} or {gid, id}
+      if (parts[1] === 'site' && parts[2] === 'publish' && req.method === 'POST') {
+        const body = await readBody(req);
+        return send(res, 200, await ctx.publishSite(body));
+      }
 
       // POST /api/bot/start, /api/bot/stop
       if (parts[1] === 'bot' && req.method === 'POST') {

@@ -28,6 +28,7 @@ import {
   sessionStats, statsText, sessionDir,
 } from './store.js';
 import { askAI, recapSession, buildArchive, ASK_SYSTEM, AI_LABEL } from './ai.js';
+import { publishSite, siteConfigured } from './site.js';
 
 console.log(`Starting bot. Recap AI: ${AI_LABEL}`);
 const MIN_UTTERANCE_SEC = 0.6;   // ignore coughs and clicks
@@ -272,6 +273,16 @@ async function stopSession(guild, channel, reason) {
 async function publishSession(guild, channel, dir, meta, recap, { updated = false } = {}) {
   const lines = sessionLines(dir);
   const tag = updated ? '🔁 **Updated**\n' : '';
+  // Publish to the player website first, so the Discord posts can link to it.
+  let siteLink = '';
+  if (siteConfigured()) {
+    try {
+      const r = await publishSite({ dirs: [dir] });
+      siteLink = `\n\n🌐 *Read it color-coded on the player website:* ${r.url}`;
+    } catch (err) {
+      console.error('[website]', err.message);
+    }
+  }
   // The recap goes to #recaps and the full transcript to #logs (falling back to this channel).
   const recapChannel = findChannel(guild, RECAP_CHANNEL);
   const logChannel = findChannel(guild, LOG_CHANNEL);
@@ -290,7 +301,7 @@ async function publishSession(guild, channel, dir, meta, recap, { updated = fals
       const st = sessionStats(dir);
       await sendWithFiles(logChannel,
         `${tag}📜 **Transcript: ${meta.title}** (${meta.date}) · ${lines.length} lines` +
-          (st ? ` · 🎲 ${st.gamePct}% game · 🐿️ ${st.squirrelPct}% squirrels` : ''),
+          (st ? ` · 🎲 ${st.gamePct}% game · 🐿️ ${st.squirrelPct}% squirrels` : '') + siteLink,
         attachments());
       logPosted = logChannel;
       await postColorLog(logChannel, guild.id, dir, meta.title).catch((err) => console.error('[logs] color log:', err.message));
@@ -308,7 +319,7 @@ async function publishSession(guild, channel, dir, meta, recap, { updated = fals
     const allFiles = logPosted ? [] : attachments();
     const recapFiles = allFiles.slice(0, 1);
     const meter = statsText(sessionStats(dir));
-    const text = `${tag}# ${meta.title} — ${meta.date}\n${recap}${meter ? `\n\n${meter}` : ''}${pointer}`;
+    const text = `${tag}# ${meta.title} — ${meta.date}\n${recap}${meter ? `\n\n${meter}` : ''}${pointer}${siteLink}`;
     if (recapChannel) {
       try { await sendLong(recapChannel, text, recapFiles); recapPosted = recapChannel; }
       catch (err) {

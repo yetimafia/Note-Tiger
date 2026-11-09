@@ -9,6 +9,7 @@ import {
 import { listSessions, readSession, sessionDir, knownGuilds, transcriptHtml } from './store.js';
 import { recapSession, askArchive, ollamaStatus, refreshOllama, AI_LABEL } from './ai.js';
 import { startWeb } from './web.js';
+import { publishSite, siteStatus, siteConfigured } from './site.js';
 
 const RESTART_CODE = 75; // the launcher restarts the manager when it exits with this code
 
@@ -135,7 +136,12 @@ startWeb({
         ? `https://discord.com/oauth2/authorize?client_id=${clientId}&scope=bot%20applications.commands&permissions=2150665216`
         : null,
       guilds: guildList(),
+      site: siteStatus(),
     };
+  },
+  async publishSite({ all = false, gid = null, id = null } = {}) {
+    if (all) return publishSite({ all: true });
+    return publishSite({ dirs: [sessionDir(safeGid(gid), id)] });
   },
   startBot,
   async stopBot() { await stopBot(); },
@@ -160,7 +166,9 @@ startWeb({
     const dir = sessionDir(gid, id);
     if (liveSessionId(gid) === id) throw new Error('That session is still recording.');
     // Rewriting also re-checks which parts were table talk.
-    return recapSession(dir, { reclassify: true });
+    const recap = await recapSession(dir, { reclassify: true });
+    if (siteConfigured()) publishSite({ dirs: [dir] }).catch((e) => console.error('[website]', e.message));
+    return recap;
   },
   deleteSession(gid, id) {
     const dir = sessionDir(gid, id);
