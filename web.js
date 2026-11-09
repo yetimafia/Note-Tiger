@@ -117,6 +117,9 @@ export function startWeb(ctx, port) {
         }
       }
 
+      // GET /api/progress
+      if (parts[1] === 'progress' && req.method === 'GET') return send(res, 200, ctx.progress());
+
       // GET /api/logs
       if (parts[1] === 'logs' && req.method === 'GET') return send(res, 200, ctx.logs());
 

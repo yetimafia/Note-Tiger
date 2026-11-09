@@ -53,7 +53,9 @@
   .radio label { flex: 1; min-width: 220px; margin: 0; font-weight: 400; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 12px; cursor: pointer; }
   .radio input { margin-right: 8px; }
   .radio label:has(input:checked) { border-color: var(--accent); }
-  .sessions { display: grid; grid-template-columns: 300px 1fr; gap: 16px; align-items: start; }
+  html, body { overflow-x: hidden; }
+  .sessions { display: grid; grid-template-columns: minmax(200px, 280px) minmax(0, 1fr); gap: 16px; align-items: start; }
+  #sessView { min-width: 0; }
   .list { max-height: 70vh; overflow: auto; padding: 6px; }
   .item { padding: 10px 12px; border-radius: 8px; cursor: pointer; border: 1px solid transparent; }
   .item:hover { background: var(--panel2); }
@@ -63,7 +65,12 @@
   .tag { display: inline-block; font-size: 11px; padding: 1px 7px; border-radius: 99px; margin-left: 6px; vertical-align: 1px; }
   .tag.live { background: var(--red); color: #fff; }
   .tag.norecap { background: var(--panel2); color: var(--dim); border: 1px solid var(--line); }
-  .tabs2 { display: flex; gap: 6px; margin: 12px 0; }
+  .tabs2 { display: flex; gap: 6px; margin: 12px 0; flex-wrap: wrap; }
+  .tabs2 .btn { white-space: nowrap; }
+  .prog { background: var(--panel2); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; margin: 12px 0; }
+  .prog .track { height: 10px; background: var(--bg); border-radius: 99px; overflow: hidden; margin: 8px 0 6px; }
+  .prog .fill { height: 100%; background: linear-gradient(90deg, var(--accent), #ffcf6e); border-radius: 99px; transition: width .6s ease; }
+  .prog .row2 { display: flex; justify-content: space-between; gap: 10px; font-size: 13px; color: var(--dim); flex-wrap: wrap; }
   .recap { line-height: 1.65; }
   .recap h1, .recap h2, .recap h3 { margin: 18px 0 6px; }
   .recap blockquote { border-left: 3px solid var(--accent); margin: 8px 0; padding: 2px 12px; color: var(--dim); }
@@ -104,7 +111,7 @@
   .tag.tt { background: var(--bg); color: var(--dim); border: 1px solid var(--line); }
   .tview.hide-tt .tblock.tt { display: none; }
   .switch { display: flex; align-items: center; gap: 8px; font-weight: 400; margin: 0; cursor: pointer; }
-  @media (max-width: 800px) { .sessions { grid-template-columns: 1fr; } nav { margin-left: 0; } header { flex-wrap: wrap; } }
+  @media (max-width: 900px) { .sessions { grid-template-columns: minmax(0, 1fr); } .list { max-height: 220px; } nav { margin-left: 0; } header { flex-wrap: wrap; } }
 </style>
 </head>
 <body>
@@ -411,6 +418,12 @@ function renderHome() {
     banners += `<div class="banner warn">Ollama is running but the model <code>${esc(s.ollamaModel)}</code> isn't downloaded yet.
       ${s.canInstallLocalAI ? '<button class="btn" style="margin-left:8px" onclick="setupLocalAI(this)">Download it</button>' : `Run <code>ollama pull ${esc(s.ollamaModel)}</code>.`}</div>`;
   }
+  for (const [key, p] of Object.entries(s.progress || {})) {
+    const [gid] = key.split('/');
+    const g = s.guilds.find((x) => x.id === gid);
+    banners += `<div class="banner warn">✍️ Writing a recap${g ? ` for ${esc(g.name)}` : ''}: <b>${p.pct}%</b> · ${esc(p.label)}
+      <div style="height:8px;background:var(--bg);border-radius:99px;overflow:hidden;margin-top:8px"><div style="height:100%;width:${Math.max(2, p.pct)}%;background:var(--accent)"></div></div></div>`;
+  }
   const rec = s.guilds.filter((g) => g.recording);
   for (const g of rec) {
     banners += `<div class="banner err">🔴 Recording <b>${esc(g.recording.title)}</b> in ${esc(g.name)}: ${g.recording.minutes} min, ${g.recording.lines} lines transcribed${g.recording.pending ? `, ${g.recording.pending} in progress` : ''}.</div>`;
@@ -502,6 +515,7 @@ async function openSession(id, view = 'recap') {
     <h1>${esc(s.title)}</h1>
     <div class="hint">${esc(s.date)}${s.voiceChannel ? ` · ${esc(s.voiceChannel)}` : ''}${dur != null ? ` · ${Math.floor(dur / 60)}h ${dur % 60}m` : ''}${s.tableTalkLines ? ` · ${s.tableTalkLines} line${s.tableTalkLines === 1 ? '' : 's'} of table talk kept out of the recap` : ''}${s.recapLines ? ` · opening recap of last session (${s.recapLines} line${s.recapLines === 1 ? '' : 's'}) left out` : ''}</div>
     ${renderMeter(s.stats)}
+    <div id="progBox"></div>
     <div class="tabs2">
       <button class="btn ${view === 'recap' ? '' : 'ghost'}" data-v="recap">Recap</button>
       <button class="btn ${view === 'transcript' ? '' : 'ghost'}" data-v="transcript">Transcript</button>
@@ -519,11 +533,13 @@ async function openSession(id, view = 'recap') {
   $('#sessView').querySelectorAll('[data-v]').forEach((b) => b.addEventListener('click', () => openSession(id, b.dataset.v)));
   $('#dlBtn').onclick = () => { location.href = `/api/sessions/${gid}/${encodeURIComponent(id)}/transcript`; };
   $('#regenBtn').onclick = async (e) => {
-    e.target.disabled = true; e.target.textContent = 'Writing… (can take a few minutes)';
-    try { await api(`/api/sessions/${gid}/${encodeURIComponent(id)}/recap`, { method: 'POST', body: {} }); toast('Recap written.'); }
+    e.target.disabled = true; e.target.textContent = 'Rewriting…';
+    watchProgress(`${gid}/${id}`);
+    try { await api(`/api/sessions/${gid}/${encodeURIComponent(id)}/recap`, { method: 'POST', body: {} }); toast('Recap rewritten.'); }
     catch (err) { toast(err.message); }
     openSession(id); loadSessions();
   };
+  watchProgress(`${gid}/${id}`); // also shows progress if a rewrite is already running
   $('#repostBtn').onclick = async (e) => {
     if (!status?.online) { toast('Start the bot first: it has to be online in Discord to post.'); return; }
     if (!confirm(`Post "${s.title}" to Discord again with its current recap and transcript?`)) return;
@@ -540,6 +556,28 @@ async function openSession(id, view = 'recap') {
     try { await api(`/api/sessions/${gid}/${encodeURIComponent(id)}`, { method: 'DELETE' }); toast('Deleted.'); currentSession = null; loadSessions(); }
     catch (err) { toast(err.message); }
   };
+}
+
+// ---------- progress bar for recaps being written ----------
+let progTimer = null;
+function watchProgress(key) {
+  clearInterval(progTimer);
+  const tick = async () => {
+    const box = $('#progBox');
+    if (!box) { clearInterval(progTimer); return; }
+    const all = await api('/api/progress').catch(() => null);
+    const p = all?.[key];
+    if (!p) { box.innerHTML = ''; return; }
+    const secs = Math.round((Date.now() - p.startedAt) / 1000);
+    const eta = p.pct >= 3 ? Math.max(0, Math.round(secs * (100 - p.pct) / p.pct)) : null;
+    const t = (n) => n >= 60 ? `${Math.floor(n / 60)}m ${n % 60}s` : `${n}s`;
+    box.innerHTML = `<div class="prog"><b>✍️ Writing the recap… ${p.pct}%</b>
+      <div class="track"><div class="fill" style="width:${Math.max(2, p.pct)}%"></div></div>
+      <div class="row2"><span>${esc(p.label)}</span><span>${t(secs)} so far${eta != null ? ` · about ${t(eta)} left` : ''}</span></div></div>`;
+    const btn = $('#regenBtn'); if (btn) { btn.disabled = true; btn.textContent = `Rewriting… ${p.pct}%`; }
+  };
+  tick();
+  progTimer = setInterval(tick, 1500);
 }
 
 function fmtDur(ms) { const m = Math.round(ms / 60000); return m >= 60 ? `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, '0')}m` : `${m}m`; }

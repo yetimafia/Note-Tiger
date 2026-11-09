@@ -228,8 +228,10 @@ export function sessionStats(dir) {
   if (lines.length < 2) return null;
   const meta = readJSON(path.join(dir, 'meta.json'), {});
   const { offTopic, recap } = readLabels(dir);
-  const start = Math.min(lines[0].t, Date.parse(meta.startedAt) || Infinity);
-  const end = Math.max(lines.at(-1).t + 5000, Date.parse(meta.endedAt) || 0);
+  // Recording start/end count as quiet time, but only if they're close to the first/last line.
+  const near = (v, ref) => (Number.isFinite(v) && Math.abs(v - ref) < 30 * 60_000 ? v : ref);
+  const start = Math.min(lines[0].t, near(Date.parse(meta.startedAt), lines[0].t));
+  const end = Math.max(lines.at(-1).t + 5000, near(Date.parse(meta.endedAt), lines.at(-1).t + 5000));
   const ms = { game: 0, squirrel: 0, recap: 0, quiet: lines[0].t - start };
   const squirrels = {};
   for (let i = 0; i < lines.length; i++) {

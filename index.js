@@ -27,7 +27,7 @@ import {
   sessionLines, readTableTalk, readLabels, transcriptEntries, speakerColors, baseName, writeTranscriptFiles,
   sessionStats, statsText, sessionDir,
 } from './store.js';
-import { askAI, recapSession, buildArchive, ASK_SYSTEM, AI_LABEL } from './ai.js';
+import { askAI, recapSession, buildArchive, ASK_SYSTEM, AI_LABEL, getProgress } from './ai.js';
 import { publishSite, siteConfigured } from './site.js';
 
 console.log(`Starting bot. Recap AI: ${AI_LABEL}`);
@@ -604,6 +604,7 @@ function report() {
     clientId: client.user?.id ?? null,
     loginError,
     speech: { state: whisperState, error: whisperError, model: WHISPER_MODEL },
+    progress: getProgress(),
     guilds: [...client.guilds.cache.values()].map((g) => {
       const rec = live.get(g.id);
       return {

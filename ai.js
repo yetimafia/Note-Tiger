@@ -11,6 +11,17 @@ import {
   previousRecap,
 } from './store.js';
 
+// ---------- progress (shown as a progress bar in Note Tiger) ----------
+// Key: "<server id>/<session id>". Stages: tagging 0–70%, opening recap 70–75%, notes 75–95%, recap 95–100%.
+const progress = new Map();
+const progKey = (dir) => `${path.basename(path.dirname(path.dirname(dir)))}/${path.basename(dir)}`;
+function setProgress(dir, from, to, frac, label) {
+  const pct = Math.round(from + (to - from) * Math.max(0, Math.min(1, frac)));
+  const prev = progress.get(progKey(dir));
+  progress.set(progKey(dir), { pct, label, startedAt: prev?.startedAt ?? Date.now() });
+}
+export function getProgress() { return Object.fromEntries(progress); }
+
 const anthropic = USE_CLAUDE ? new Anthropic({ apiKey: ANTHROPIC_API_KEY }) : null;
 export const AI_LABEL = USE_CLAUDE ? `Claude (${CLAUDE_MODEL})` : `Local: ${OLLAMA_MODEL} (Ollama)`;
 
@@ -175,6 +186,7 @@ export async function tagLines(dir, { force = false } = {}) {
     const body = lines.slice(start, end).map((l, k) => `L${start + k} ${l.gm ? '[GM] ' : ''}${l.speaker}: ${l.text}`).join('\n');
     const knownPart = known.size ? `Characters the GM has voiced so far: ${[...known].slice(-15).join(', ')}\n\n` : '';
     if (start % (size * 10) === 0) console.log(`[tagging] lines ${start + 1}–${Math.min(start + size * 10, lines.length)} of ${lines.length}`);
+    setProgress(dir, 0, 70, start / lines.length, `Sorting game vs. table talk and GM voices: line ${start + 1} of ${lines.length}`);
     try {
       const answer = await askAI(TAG_SYSTEM, `${knownPart}${context ? `${context}\n\n` : ''}LABEL THESE LINES:\n${body}`, size * 12);
       const tags = parseTags(answer);
@@ -235,6 +247,7 @@ export async function detectOpeningRecap(dir, { prevRecap = null, force = false 
   let end = -1;
   try {
     console.log(`[opening recap] checking the first ${n} lines`);
+    setProgress(dir, 70, 75, 0, 'Looking for the recap of last session at the start');
     const answer = await askAI(OPENING_RECAP_SYSTEM, `${context}START OF THIS SESSION:\n${numbered}`, 300, { json: true });
     const m = answer.match(/\{[\s\S]*\}/);
     const v = m ? JSON.parse(m[0]).recapEndsAt : null;
@@ -264,27 +277,40 @@ const TABLE_TALK_NOTE = `TABLE TALK (off-topic chatter, not part of the game). D
 the Best Lines section. Mark any quote you take from it with "(table talk)".`;
 
 // Long sessions are too big for a local model in one go, so: notes per chunk, then one recap from the notes.
-async function writeRecap(title, date, gameText, tableText, prevRecap) {
+async function writeRecap(title, date, gameText, tableText, prevRecap, dir = null) {
+  const step = (frac, label) => dir && setProgress(dir, 75, 99, frac, label);
   const prevPart = prevRecap ? `For context, here is the PREVIOUS session's recap:\n${prevRecap}\n\n---\n\n` : '';
   const head = `${prevPart}Session title: ${title} (${date})\n\n`;
   const tablePart = tableText ? `\n\n---\n${TABLE_TALK_NOTE}\n${tableTalkCandidates(tableText, USE_CLAUDE ? 60_000 : 6_000)}` : '';
   const chunks = chunkText(gameText || '(no in-game talk was transcribed)', RECAP_CHUNK_CHARS);
   if (chunks.length === 1) {
+    step(0.2, 'Writing the recap');
     return askAI(RECAP_SYSTEM, `${head}GAME TRANSCRIPT:\n${gameText}${tablePart}`, 6000);
   }
   const notes = [];
   for (let i = 0; i < chunks.length; i++) {
     console.log(`[recap] notes for part ${i + 1}/${chunks.length}`);
+    step(i / (chunks.length + 1), `Taking notes: part ${i + 1} of ${chunks.length}`);
     notes.push(`--- Part ${i + 1} of ${chunks.length} ---\n` +
       await askAI(CHUNK_NOTES_SYSTEM, `TRANSCRIPT PART ${i + 1}:\n${chunks[i]}`, 1200));
   }
+  step(chunks.length / (chunks.length + 1), 'Writing the recap from the notes');
   return askAI(RECAP_SYSTEM,
     `${head}The game transcript was long, so here are notes taken from it in order ` +
     `(treat them as the game transcript):\n\n${notes.join('\n\n')}${tablePart}`, 4000);
 }
 
 // Tags table talk, writes transcript.txt and recap.md for a session folder, and returns the recap.
-export async function recapSession(dir, { prevRecap = previousRecap(dir), reclassify = false } = {}) {
+export async function recapSession(dir, opts = {}) {
+  setProgress(dir, 0, 1, 0, 'Starting…');
+  try {
+    return await recapSessionInner(dir, opts);
+  } finally {
+    progress.delete(progKey(dir));
+  }
+}
+
+async function recapSessionInner(dir, { prevRecap = previousRecap(dir), reclassify = false } = {}) {
   const meta = readJSON(path.join(dir, 'meta.json'), {});
   const lines = sessionLines(dir);
   const notes = readJSON(path.join(dir, 'notes.json'), []);
@@ -298,6 +324,7 @@ export async function recapSession(dir, { prevRecap = previousRecap(dir), reclas
     formatTranscript(lines, notes, labels, 'game'),
     offTopic.size ? formatTranscript(lines, [], labels, 'table') : '',
     prevRecap,
+    dir,
   );
   fs.writeFileSync(path.join(dir, 'recap.md'), text);
   return text;

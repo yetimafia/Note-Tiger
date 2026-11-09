@@ -7,7 +7,7 @@ import {
   APP_DIR, DISCORD_TOKEN, PANEL_PORT, AUTO_START, USE_CLAUDE, OLLAMA_MODEL, CAMPAIGN_NAME, WHISPER_MODEL,
 } from './config.js';
 import { listSessions, readSession, sessionDir, knownGuilds, transcriptHtml } from './store.js';
-import { recapSession, askArchive, ollamaStatus, refreshOllama, AI_LABEL } from './ai.js';
+import { recapSession, askArchive, ollamaStatus, refreshOllama, AI_LABEL, getProgress } from './ai.js';
 import { startWeb } from './web.js';
 import { publishSite, siteStatus, siteConfigured } from './site.js';
 
@@ -137,8 +137,11 @@ startWeb({
         : null,
       guilds: guildList(),
       site: siteStatus(),
+      progress: this.progress(),
     };
   },
+  // Recaps being written right now (in this window, or by the bot after a session).
+  progress() { return { ...(bot ? botStatus?.progress : null), ...getProgress() }; },
   async publishSite({ all = false, gid = null, id = null } = {}) {
     if (all) return publishSite({ all: true });
     return publishSite({ dirs: [sessionDir(safeGid(gid), id)] });
