@@ -25,7 +25,7 @@ import { DISCORD_TOKEN, WHISPER_MODEL, WHISPER_DTYPE, MODELS_DIR, LOG_CHANNEL, R
 import {
   readJSON, writeJSON, sessionsDir, getSettings, saveSettings, listSessions, readLines, saveGuildName,
   sessionLines, readTableTalk, readLabels, transcriptEntries, speakerColors, baseName, writeTranscriptFiles,
-  sessionStats, statsText,
+  sessionStats, statsText, sessionDir,
 } from './store.js';
 import { askAI, recapSession, buildArchive, ASK_SYSTEM, AI_LABEL } from './ai.js';
 
@@ -263,25 +263,37 @@ async function stopSession(guild, channel, reason) {
     await channel.send(`The recap failed (${err.message}), but the transcript was saved. Fix that and run \`/recap\`.`);
   }
 
+  await publishSession(guild, channel, rec.dir, rec.meta, recap);
+}
+
+// Posts a session's recap (+ squirrel-o-meter) to #recaps and its transcript to #logs.
+// channel = where a command was used (fallback + short "done" note); null when started from Note Tiger.
+// updated = true when reposting, so people can tell it's the new version.
+async function publishSession(guild, channel, dir, meta, recap, { updated = false } = {}) {
+  const lines = sessionLines(dir);
+  const tag = updated ? '🔁 **Updated**\n' : '';
   // The recap goes to #recaps and the full transcript to #logs (falling back to this channel).
   const recapChannel = findChannel(guild, RECAP_CHANNEL);
   const logChannel = findChannel(guild, LOG_CHANNEL);
-  const files = writeTranscriptFiles(rec.dir, guild.id);
+  const files = writeTranscriptFiles(dir, guild.id);
   // Discord shows .html files as code, so only the plain text goes to Discord; the color-coded page
   // (transcript.html) is available from "Download transcript" in the Note Tiger window.
-  const attachments = () => transcriptAttachments(files.txt, `transcript-${rec.meta.date}`, rec.meta.title);
+  const attachments = () => transcriptAttachments(files.txt, `transcript-${meta.date}`, meta.title);
   const tips = [];
+  // Where things go if #recaps / #logs don't exist.
+  const home = channel ?? recapChannel ?? logChannel ?? firstWritableChannel(guild);
+  if (!home) throw new Error('I can\'t find a text channel I\'m allowed to post in on that server.');
 
   let logPosted = null;
   if (logChannel) {
     try {
-      const st = sessionStats(rec.dir);
+      const st = sessionStats(dir);
       await sendWithFiles(logChannel,
-        `📜 **Transcript: ${rec.meta.title}** (${rec.meta.date}) · ${lines.length} lines` +
+        `${tag}📜 **Transcript: ${meta.title}** (${meta.date}) · ${lines.length} lines` +
           (st ? ` · 🎲 ${st.gamePct}% game · 🐿️ ${st.squirrelPct}% squirrels` : ''),
         attachments());
       logPosted = logChannel;
-      await postColorLog(logChannel, guild.id, rec.dir, rec.meta.title).catch((err) => console.error('[logs] color log:', err.message));
+      await postColorLog(logChannel, guild.id, dir, meta.title).catch((err) => console.error('[logs] color log:', err.message));
     } catch (err) {
       console.error(`[logs] couldn't post in #${logChannel.name}:`, err.message);
       tips.push(`I couldn't post in <#${logChannel.id}>. Check that I can send messages and attach files there.`);
@@ -295,8 +307,8 @@ async function stopSession(guild, channel, reason) {
     const pointer = logPosted ? `\n\n*Full transcript in <#${logPosted.id}>.*` : '';
     const allFiles = logPosted ? [] : attachments();
     const recapFiles = allFiles.slice(0, 1);
-    const meter = statsText(sessionStats(rec.dir));
-    const text = `# ${rec.meta.title} — ${rec.meta.date}\n${recap}${meter ? `\n\n${meter}` : ''}${pointer}`;
+    const meter = statsText(sessionStats(dir));
+    const text = `${tag}# ${meta.title} — ${meta.date}\n${recap}${meter ? `\n\n${meter}` : ''}${pointer}`;
     if (recapChannel) {
       try { await sendLong(recapChannel, text, recapFiles); recapPosted = recapChannel; }
       catch (err) {
@@ -306,18 +318,39 @@ async function stopSession(guild, channel, reason) {
     } else if (RECAP_CHANNEL) {
       tips.push(`Create a text channel called **#${RECAP_CHANNEL}** and I'll post recaps there.`);
     }
-    if (!recapPosted) { await sendLong(channel, text, recapFiles); recapPosted = channel; }
+    if (!recapPosted) { await sendLong(home, text, recapFiles); recapPosted = home; }
     for (const f of allFiles.slice(1)) await recapPosted.send({ content: f.partLabel, files: [f] });
+    if (!logPosted && allFiles.length) logPosted = recapPosted;
   } else if (!logPosted) {
-    await sendWithFiles(channel, `📜 Transcript: ${rec.meta.title}`, attachments());
+    await sendWithFiles(home, `${tag}📜 Transcript: ${meta.title}`, attachments());
+    logPosted = home;
   }
 
   // Short note where the command was used, so people know where to look.
-  const where = [];
-  if (recapPosted && recapPosted.id !== channel.id) where.push(`recap in <#${recapPosted.id}>`);
-  if (logPosted && logPosted.id !== channel.id) where.push(`transcript in <#${logPosted.id}>`);
-  const note = [where.length ? `✅ Done: ${where.join(', ')}.` : '', ...tips.map((t) => `*${t}*`)].filter(Boolean).join('\n');
-  if (note) await channel.send(note).catch(() => {});
+  if (channel) {
+    const where = [];
+    if (recapPosted && recapPosted.id !== channel.id) where.push(`recap in <#${recapPosted.id}>`);
+    if (logPosted && logPosted.id !== channel.id) where.push(`transcript in <#${logPosted.id}>`);
+    const note = [where.length ? `✅ Done: ${where.join(', ')}.` : '', ...tips.map((t) => `*${t}*`)].filter(Boolean).join('\n');
+    if (note) await channel.send(note).catch(() => {});
+  }
+  return { recap: recapPosted?.name ?? null, transcript: logPosted?.name ?? null, tips: tips.map((t) => t.replace(/\*\*/g, '').replace(/<#\d+>/g, 'that channel')) };
+}
+
+function firstWritableChannel(guild) {
+  const me = guild.members.me;
+  const ok = (c) => c?.isTextBased?.() && !c.isThread?.() && !c.isVoiceBased?.() && c.permissionsFor(me)?.has(['ViewChannel', 'SendMessages']);
+  if (ok(guild.systemChannel)) return guild.systemChannel;
+  return guild.channels.cache.filter(ok).sort((a, b) => a.rawPosition - b.rawPosition).first() ?? null;
+}
+
+// Re-posts a saved session with its current recap and transcript (after "Rewrite recap", for example).
+async function repostSession(guild, sessionDirPath, channel = null) {
+  const meta = readJSON(path.join(sessionDirPath, 'meta.json'), {});
+  const recapFile = path.join(sessionDirPath, 'recap.md');
+  let recap = fs.existsSync(recapFile) ? fs.readFileSync(recapFile, 'utf8') : null;
+  if (!recap) recap = await recapSession(sessionDirPath);
+  return publishSession(guild, channel, sessionDirPath, meta, recap, { updated: true });
 }
 
 // The conversation as color-coded blocks: one pastel color per person, grouped by who's talking.
@@ -421,6 +454,8 @@ const commands = [
       .addChoices({ name: 'on (don\'t record me)', value: 'on' }, { name: 'off (record me)', value: 'off' })),
   new SlashCommandBuilder().setName('recap').setDescription('Re-post a past session recap')
     .addIntegerOption((o) => o.setName('sessions_ago').setDescription('1 = latest (default), 2 = the one before…').setMinValue(1)),
+  new SlashCommandBuilder().setName('repost').setDescription('Post a session\'s recap and transcript again, updated')
+    .addIntegerOption((o) => o.setName('sessions_ago').setDescription('1 = latest (default), 2 = the one before…').setMinValue(1)),
   new SlashCommandBuilder().setName('ask').setDescription('Ask about past sessions')
     .addStringOption((o) => o.setName('question').setDescription('e.g. "What did Mr. Johnson offer us for the Ares job?"').setRequired(true)),
 ].map((c) => c.toJSON());
@@ -520,6 +555,16 @@ client.on('interactionCreate', async (interaction) => {
       return;
     }
 
+    if (commandName === 'repost') {
+      const sessions = listSessions(gid).filter((x) => !(live.get(gid)?.dir === x.dir));
+      const n = interaction.options.getInteger('sessions_ago') ?? 1;
+      const s = sessions[sessions.length - n];
+      if (!s) return interaction.reply({ content: 'No finished session found that far back.', flags: MessageFlags.Ephemeral });
+      await interaction.reply(`🔁 Reposting **${s.title}** (${s.date})…`);
+      await repostSession(guild, s.dir, interaction.channel);
+      return;
+    }
+
     if (commandName === 'ask') {
       const question = interaction.options.getString('question');
       await interaction.deferReply();
@@ -574,7 +619,22 @@ async function shutdown(reason) {
   client.destroy().catch?.(() => {});
   process.exit(0);
 }
-process.on('message', (msg) => { if (msg?.type === 'stop') shutdown('bot stopped from Note Tiger'); });
+process.on('message', async (msg) => {
+  if (msg?.type === 'stop') return shutdown('bot stopped from Note Tiger');
+  if (msg?.type === 'repost') {
+    try {
+      const guild = client.guilds.cache.get(msg.gid);
+      if (!guild) throw new Error('The bot isn\'t in that server.');
+      const dir = sessionDir(msg.gid, msg.sessionId);
+      if (live.get(msg.gid)?.dir === dir) throw new Error('That session is still recording.');
+      const result = await repostSession(guild, dir);
+      process.send({ type: 'reply', id: msg.id, ok: true, result });
+    } catch (err) {
+      console.error('[repost]', err.message);
+      process.send({ type: 'reply', id: msg.id, ok: false, error: err.message });
+    }
+  }
+});
 process.on('SIGINT', () => shutdown('bot shutting down'));
 process.on('disconnect', () => shutdown('Note Tiger closed'));
 process.on('unhandledRejection', (err) => console.error('[unhandled]', err));

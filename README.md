@@ -68,6 +68,7 @@ Download this repo (green **Code** button → **Download ZIP**), unzip it **outs
 | `/session stop` | A minute or two later, posts the recap in **#recaps** and the full transcript in **#logs**. Create those two text channels (or pick other names in Settings); if they don't exist, both go to the channel you typed in. |
 | `/ask question:Who was the decker in Redmond?` | Answers from all recorded sessions. |
 | `/recap` | Re-posts the latest recap. |
+| `/repost` | Posts a session's recap **and** transcript to #recaps / #logs again, marked 🔁 Updated (e.g. after **Rewrite recap**). Also a **Repost to Discord** button on each session in Note Tiger. |
 | `/optout mode:on` | The bot won't record that person's voice. |
 
 In the **control panel** you can also read every recap and transcript, download transcripts, rewrite a recap, delete sessions, ask questions, and change settings.

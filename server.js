@@ -48,11 +48,17 @@ function startBot() {
   bot.stdout.on('data', (d) => { process.stdout.write(d); addLog('log', d.toString(), 'bot'); });
   bot.stderr.on('data', (d) => { process.stderr.write(d); addLog('error', d.toString(), 'bot'); });
   bot.on('message', (msg) => {
+    if (msg?.type === 'reply') {
+      const p = pending.get(msg.id);
+      if (p) { clearTimeout(p.timer); pending.delete(msg.id); msg.ok ? p.resolve(msg.result) : p.reject(new Error(msg.error)); }
+      return;
+    }
     if (msg?.type !== 'status') return;
     botStatus = msg;
     if (botState === 'starting' && msg.online) botState = 'running';
   });
   bot.on('exit', (code, signal) => {
+    for (const [id, p] of pending) { clearTimeout(p.timer); p.reject(new Error('The bot stopped.')); pending.delete(id); }
     const wasStopping = botState === 'stopping';
     bot = null;
     if (wasStopping || code === 0) {
@@ -69,6 +75,19 @@ function startBot() {
       console.error(`The bot stopped unexpectedly (exit code ${code ?? signal}).`);
     }
     botStatus = botStatus ? { ...botStatus, online: false, guilds: botStatus.guilds?.map((g) => ({ ...g, recording: null })) } : null;
+  });
+}
+
+// Ask the running bot to do something and wait for its answer.
+const pending = new Map();
+let nextId = 1;
+function askBot(msg, timeoutMs = 10 * 60_000) {
+  if (!bot || !botStatus?.online) return Promise.reject(new Error('Start the bot first: it has to be online in Discord to post.'));
+  const id = nextId++;
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => { pending.delete(id); reject(new Error('The bot took too long to answer.')); }, timeoutMs);
+    pending.set(id, { resolve, reject, timer });
+    bot.send({ ...msg, id });
   });
 }
 
@@ -147,6 +166,11 @@ startWeb({
     const dir = sessionDir(gid, id);
     if (liveSessionId(gid) === id) throw new Error('Stop the recording before deleting it.');
     fs.rmSync(dir, { recursive: true, force: true });
+  },
+  async repostSession(gid, id) {
+    sessionDir(safeGid(gid), id); // validates
+    if (liveSessionId(gid) === id) throw new Error('That session is still recording.');
+    return askBot({ type: 'repost', gid, sessionId: id });
   },
   transcriptHtml(gid, id) { return transcriptHtml(gid, sessionDir(gid, id)); },
   ask(gid, question) { return askArchive(safeGid(gid), question); },

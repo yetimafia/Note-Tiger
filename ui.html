@@ -277,7 +277,7 @@ async function api(path, opts = {}) {
 
 function toast(msg) {
   const t = $('#toast'); t.textContent = msg; t.style.display = 'block';
-  clearTimeout(toast.t); toast.t = setTimeout(() => (t.style.display = 'none'), 3500);
+  clearTimeout(toast.t); toast.t = setTimeout(() => (t.style.display = "none"), 6000);
 }
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -484,6 +484,7 @@ async function openSession(id, view = 'recap') {
       <button class="btn ${view === 'transcript' ? '' : 'ghost'}" data-v="transcript">Transcript</button>
       <span style="flex:1"></span>
       <button class="btn ghost" id="dlBtn" title="Color-coded page that opens in any browser">Download transcript</button>
+      <button class="btn ghost" id="repostBtn" title="Post this session's recap and transcript to Discord again (marked as updated)">Repost to Discord</button>
       <button class="btn ghost" id="regenBtn" title="Re-checks table talk and writes the recap again">${s.recap ? 'Rewrite recap' : 'Write recap'}</button>
       <button class="btn danger" id="delBtn">Delete</button>
     </div>
@@ -499,6 +500,17 @@ async function openSession(id, view = 'recap') {
     try { await api(`/api/sessions/${gid}/${encodeURIComponent(id)}/recap`, { method: 'POST', body: {} }); toast('Recap written.'); }
     catch (err) { toast(err.message); }
     openSession(id); loadSessions();
+  };
+  $('#repostBtn').onclick = async (e) => {
+    if (!status?.online) { toast('Start the bot first: it has to be online in Discord to post.'); return; }
+    if (!confirm(`Post "${s.title}" to Discord again with its current recap and transcript?`)) return;
+    e.target.disabled = true; e.target.textContent = 'Posting…';
+    try {
+      const r = await api(`/api/sessions/${gid}/${encodeURIComponent(id)}/repost`, { method: 'POST', body: {} });
+      const where = [r.recap && `recap in #${r.recap}`, r.transcript && `transcript in #${r.transcript}`].filter(Boolean).join(', ');
+      toast(`Reposted${where ? `: ${where}` : ''}.${r.tips?.length ? ' ' + r.tips.join(' ') : ''}`);
+    } catch (err) { toast(err.message); }
+    e.target.disabled = false; e.target.textContent = 'Repost to Discord';
   };
   $('#delBtn').onclick = async () => {
     if (!confirm(`Delete "${s.title}" and its transcript for good?`)) return;

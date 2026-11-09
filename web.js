@@ -150,6 +150,7 @@ export function startWeb(ctx, port) {
         if (!action && req.method === 'GET') return send(res, 200, ctx.readSession(guild, id));
         if (!action && req.method === 'DELETE') { ctx.deleteSession(guild, id); return send(res, 200, { ok: true }); }
         if (action === 'recap' && req.method === 'POST') return send(res, 200, { recap: await ctx.regenerateRecap(guild, id) });
+        if (action === 'repost' && req.method === 'POST') return send(res, 200, await ctx.repostSession(guild, id));
         if (action === 'transcript' && req.method === 'GET') {
           const s = ctx.readSession(guild, id);
           const asText = url.searchParams.get('format') === 'txt';
