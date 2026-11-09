@@ -10,6 +10,7 @@ import { listSessions, readSession, sessionDir, knownGuilds, transcriptHtml } fr
 import { recapSession, askArchive, ollamaStatus, refreshOllama, AI_LABEL, getProgress } from './ai.js';
 import { startWeb } from './web.js';
 import { publishSite, siteStatus, siteConfigured } from './site.js';
+import { LIB_DIR, listBooks, syncLibrary, libraryProgress, addBook, removeBook, askBooks } from './library.js';
 
 const RESTART_CODE = 75; // the launcher restarts the manager when it exits with this code
 
@@ -183,6 +184,15 @@ startWeb({
     if (liveSessionId(gid) === id) throw new Error('That session is still recording.');
     return askBot({ type: 'repost', gid, sessionId: id });
   },
+  library() { return { books: listBooks(), progress: libraryProgress(), folder: LIB_DIR }; },
+  addBook(name, buffer) { return addBook(name, buffer); },
+  removeBook(key) { removeBook(key); },
+  askBooks(question) { return askBooks(question); },
+  reindexLibrary() { syncLibrary().catch((e) => console.error('[library]', e.message)); },
+  openLibraryFolder() {
+    const cmd = process.platform === 'win32' ? `explorer "${LIB_DIR}"` : process.platform === 'darwin' ? `open "${LIB_DIR}"` : `xdg-open "${LIB_DIR}"`;
+    exec(cmd, () => {});
+  },
   transcriptHtml(gid, id) { return transcriptHtml(gid, sessionDir(gid, id)); },
   ask(gid, question) { return askArchive(safeGid(gid), question); },
   logs() { return LOG_LINES; },
@@ -219,6 +229,13 @@ if (DISCORD_TOKEN && AUTO_START) {
 } else if (!DISCORD_TOKEN) {
   console.log('No Discord token yet. Open Settings in Note Tiger to finish setup.');
 }
+
+// Rulebooks: index anything new now, and whenever PDFs are added to or removed from the library folder.
+syncLibrary().catch((e) => console.error('[library]', e.message));
+let libTimer = null;
+try {
+  fs.watch(LIB_DIR, () => { clearTimeout(libTimer); libTimer = setTimeout(() => syncLibrary().catch(() => {}), 3000); });
+} catch { /* watching isn't critical */ }
 
 process.on('unhandledRejection', (err) => console.error('[unhandled]', err));
 for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, async () => { await stopBot(); process.exit(0); });

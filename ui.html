@@ -121,6 +121,7 @@
     <button data-tab="home" class="active">Dashboard</button>
     <button data-tab="sessions">Sessions</button>
     <button data-tab="ask">Ask</button>
+    <button data-tab="library">Library</button>
     <button data-tab="settings">Settings</button>
   </nav>
   <div class="pill"><span class="dot" id="hdrDot"></span><span id="hdrText">Connecting…</span></div>
@@ -163,6 +164,7 @@
         <li><code>/note text:…</code> adds anything important said in text chat.</li>
         <li><code>/session stop</code> at the end. The recap posts in <b>#recaps</b> a minute or two later, the full transcript in <b>#logs</b>, and both show up here under Sessions.</li>
         <li><code>/ask question:…</code> in Discord, or use the Ask tab here.</li>
+        <li><code>/game ask question:…</code> looks things up in your rulebooks (add PDFs under Library).</li>
       </ul>
     </div>
   </section>
@@ -191,6 +193,26 @@
       <textarea id="askQ" rows="3" placeholder="e.g. What did Mr. Johnson offer us for the Ares job?"></textarea>
       <div class="row" style="margin-top:10px"><button class="btn" id="askBtn">Ask</button><span class="hint" id="askHint"></span></div>
       <div id="askOut"></div>
+    </div>
+  </section>
+
+  <!-- LIBRARY -->
+  <section id="tab-library" hidden>
+    <div class="row" style="justify-content:space-between">
+      <div><h1>📚 Rulebook library</h1><p class="sub">Add your game PDFs. Then ask in Discord with <code>/game ask</code> and get the book, page and a quick description.</p></div>
+      <div class="row">
+        <button class="btn ghost" id="libOpen">Open library folder</button>
+        <button class="btn" id="libAdd">Add PDFs</button>
+        <input type="file" id="libFile" accept="application/pdf,.pdf" multiple hidden>
+      </div>
+    </div>
+    <div class="card" id="libDrop" style="border-style:dashed;text-align:center;color:var(--dim)">Drag PDFs here, or use <b>Add PDFs</b>. Everything stays on this computer.</div>
+    <div id="libProg"></div>
+    <div class="card"><h2>Books</h2><div id="libBooks"><div class="empty">Loading…</div></div></div>
+    <div class="card">
+      <h2>Try a lookup</h2>
+      <div class="row"><input type="text" id="libQ" placeholder="e.g. How does Edge work?  ·  Ares Predator  ·  astral projection" style="flex:1"><button class="btn" id="libAsk">Look it up</button></div>
+      <div id="libOut"></div>
     </div>
   </section>
 
@@ -339,6 +361,7 @@ function showTab(name) {
   document.querySelectorAll('main > section').forEach((s) => (s.hidden = s.id !== `tab-${name}`));
   if (name === 'sessions') loadSessions();
   if (name === 'settings') loadSettings();
+  if (name === 'library') loadLibrary();
   location.hash = name;
 }
 
@@ -486,6 +509,59 @@ function openLog() {
   if (!logOpen) $('#logToggle').click();
   $('#logBox').scrollIntoView({ behavior: 'smooth' });
 }
+
+// ---------- rulebook library ----------
+let libTimer = null;
+async function loadLibrary() {
+  clearTimeout(libTimer);
+  const lib = await api('/api/library').catch((e) => { toast(e.message); return null; });
+  if (!lib) return;
+  const p = lib.progress;
+  $('#libProg').innerHTML = p ? `<div class="prog"><b>📖 Reading ${esc(p.title || p.file)}…${p.pages ? ` ${Math.round((p.page / p.pages) * 100)}%` : ''}</b>
+    <div class="track"><div class="fill" style="width:${p.pages ? Math.max(2, (p.page / p.pages) * 100) : 2}%"></div></div>
+    <div class="row2"><span>${p.pages ? `Page ${p.page} of ${p.pages}` : 'Opening…'}</span><span>${p.queue > 1 ? `${p.queue - 1} more book${p.queue > 2 ? 's' : ''} after this` : ''}</span></div></div>` : '';
+  $('#libBooks').innerHTML = lib.books.length ? lib.books.map((b) => `<div class="row" style="justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--line)">
+      <div style="min-width:0"><b>${esc(b.title)}</b><div class="hint">${esc(b.file)} · ${b.sizeMb || "<0.1"} MB${b.indexed ? ` · ${b.pages} pages` : ''}${b.indexed && b.offset === null ? ' · page numbers not found, using PDF pages' : ''}</div></div>
+      <div class="row">${b.noText ? '<span class="tag norecap" title="This PDF seems to be scanned images, so its text can\'t be read">⚠️ no readable text</span>'
+        : b.indexed ? '<span class="tag" style="background:#102a20;color:#a8f0cf">✓ searchable</span>' : b.indexing ? '<span class="tag norecap">reading…</span>' : '<span class="tag norecap">waiting</span>'}
+      <button class="btn danger" data-rm="${esc(b.key)}" data-title="${esc(b.title)}">Remove</button></div></div>`).join('')
+    : '<div class="empty">No books yet. Add your rulebook PDFs to get started.</div>';
+  $('#libBooks').querySelectorAll('[data-rm]').forEach((btn) => btn.onclick = async () => {
+    if (!confirm(`Remove "${btn.dataset.title}" from the library? (This deletes its copy in the library folder.)`)) return;
+    await api('/api/library/remove', { method: 'POST', body: { key: btn.dataset.rm } }).catch((e) => toast(e.message));
+    loadLibrary();
+  });
+  if (!$('#tab-library').hidden && (p || lib.books.some((b) => !b.indexed))) libTimer = setTimeout(loadLibrary, 1500);
+}
+
+async function uploadBooks(files) {
+  for (const f of files) {
+    if (!/\.pdf$/i.test(f.name)) { toast(`${f.name} isn't a PDF.`); continue; }
+    toast(`Adding ${f.name}…`);
+    const res = await fetch('/api/library/upload', { method: 'POST', headers: { 'Content-Type': 'application/pdf', 'X-Filename': encodeURIComponent(f.name) }, body: f });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) toast(data.error || `Couldn't add ${f.name}.`);
+  }
+  loadLibrary();
+}
+$('#libAdd').onclick = () => $('#libFile').click();
+$('#libFile').onchange = (e) => { uploadBooks([...e.target.files]); e.target.value = ''; };
+$('#libOpen').onclick = () => api('/api/library/open', { method: 'POST', body: {} }).catch((e) => toast(e.message));
+const drop = $('#libDrop');
+['dragenter', 'dragover'].forEach((ev) => drop.addEventListener(ev, (e) => { e.preventDefault(); drop.style.borderColor = 'var(--accent)'; }));
+['dragleave', 'drop'].forEach((ev) => drop.addEventListener(ev, (e) => { e.preventDefault(); drop.style.borderColor = ''; }));
+drop.addEventListener('drop', (e) => uploadBooks([...e.dataTransfer.files]));
+$('#libAsk').onclick = async () => {
+  const q = $('#libQ').value.trim(); if (!q) return;
+  const btn = $('#libAsk'); btn.disabled = true; $('#libOut').innerHTML = '<div class="hint" style="margin-top:12px">Looking it up…</div>';
+  try {
+    const r = await api('/api/library/ask', { method: 'POST', body: { question: q } });
+    $('#libOut').innerHTML = `<div class="answer recap">${md(r.answer)}</div>` +
+      (r.hits.length ? `<div class="hint" style="margin-top:8px">Searched pages: ${r.hits.map((h) => `${esc(h.title)} ${esc(h.pageLabel)}`).join(' · ')}</div>` : '');
+  } catch (err) { $('#libOut').innerHTML = `<div class="banner err" style="margin-top:12px">${esc(err.message)}</div>`; }
+  btn.disabled = false;
+};
+$('#libQ').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('#libAsk').click(); });
 
 // ---------- sessions ----------
 $('#sessGuild').addEventListener('change', () => { currentSession = null; loadSessions(); });
@@ -722,7 +798,7 @@ $('#saveBtn').addEventListener('click', async () => {
 });
 
 // ---------- start ----------
-showTab(['sessions', 'ask', 'settings'].includes(location.hash.slice(1)) ? location.hash.slice(1) : 'home');
+showTab(['sessions', 'ask', 'library', 'settings'].includes(location.hash.slice(1)) ? location.hash.slice(1) : 'home');
 refreshStatus().then(() => { if (status && !status.hasToken) showTab('settings'); });
 setInterval(refreshStatus, 5000);
 </script>

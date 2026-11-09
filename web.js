@@ -76,6 +76,17 @@ export function startWeb(ctx, port) {
     // Block requests from other websites (they can't read localhost, but they could try to POST).
     const origin = req.headers.origin;
     if (origin && !/^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)) return send(res, 403, { error: 'Forbidden' });
+    // PDF upload for the rulebook library (raw bytes; other sites can't send this type without permission).
+    if (req.method === 'POST' && req.url === '/api/library/upload') {
+      if (req.headers['content-type'] !== 'application/pdf') return send(res, 415, { error: 'Expected a PDF' });
+      try {
+        const chunks = [];
+        let size = 0;
+        for await (const c of req) { size += c.length; if (size > 1.5e9) throw new Error('That file is too big (1.5 GB max).'); chunks.push(c); }
+        const name = decodeURIComponent(req.headers['x-filename'] || 'book.pdf');
+        return send(res, 200, { ok: true, file: ctx.addBook(name, Buffer.concat(chunks)) });
+      } catch (err) { return send(res, 400, { error: err.message }); }
+    }
     if (req.method !== 'GET' && req.headers['content-type'] !== 'application/json') {
       return send(res, 415, { error: 'Expected JSON' });
     }
@@ -120,6 +131,19 @@ export function startWeb(ctx, port) {
 
       // GET /api/progress
       if (parts[1] === 'progress' && req.method === 'GET') return send(res, 200, ctx.progress());
+
+      // Rulebook library
+      if (parts[1] === 'library') {
+        if (!parts[2] && req.method === 'GET') return send(res, 200, ctx.library());
+        if (parts[2] === 'ask' && req.method === 'POST') {
+          const { question } = await readBody(req);
+          if (!question) return send(res, 400, { error: 'Type a question.' });
+          return send(res, 200, await ctx.askBooks(String(question).slice(0, 500)));
+        }
+        if (parts[2] === 'remove' && req.method === 'POST') { ctx.removeBook(String((await readBody(req)).key)); return send(res, 200, { ok: true }); }
+        if (parts[2] === 'reindex' && req.method === 'POST') { ctx.reindexLibrary(); return send(res, 200, { ok: true }); }
+        if (parts[2] === 'open' && req.method === 'POST') { ctx.openLibraryFolder(); return send(res, 200, { ok: true }); }
+      }
 
       // GET /api/logs
       if (parts[1] === 'logs' && req.method === 'GET') return send(res, 200, ctx.logs());

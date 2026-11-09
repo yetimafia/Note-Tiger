@@ -29,6 +29,7 @@ import {
 } from './store.js';
 import { askAI, recapSession, buildArchive, ASK_SYSTEM, AI_LABEL, getProgress } from './ai.js';
 import { publishSite, siteConfigured, siteUrl } from './site.js';
+import { askBooks, listBooks } from './library.js';
 import { SITE_PASSWORD, SITE_SHARE_PASSWORD } from './config.js';
 
 // "🌐 Read it on the website: <link> · 🔑 Password: ||secret||" (the password is a Discord spoiler).
@@ -476,6 +477,10 @@ const commands = [
     .addIntegerOption((o) => o.setName('sessions_ago').setDescription('1 = latest (default), 2 = the one before…').setMinValue(1)),
   new SlashCommandBuilder().setName('repost').setDescription('Post a session\'s recap and transcript again, updated')
     .addIntegerOption((o) => o.setName('sessions_ago').setDescription('1 = latest (default), 2 = the one before…').setMinValue(1)),
+  new SlashCommandBuilder().setName('game').setDescription('Look things up in your rulebooks')
+    .addSubcommand((s) => s.setName('ask').setDescription('Ask the rulebooks: get the book, page and a quick description')
+      .addStringOption((o) => o.setName('question').setDescription('e.g. "How does Edge work?" or "Ares Predator"').setRequired(true)))
+    .addSubcommand((s) => s.setName('books').setDescription('List the rulebooks I can search')),
   new SlashCommandBuilder().setName('ask').setDescription('Ask about past sessions')
     .addStringOption((o) => o.setName('question').setDescription('e.g. "What did Mr. Johnson offer us for the Ares job?"').setRequired(true)),
 ].map((c) => c.toJSON());
@@ -570,6 +575,23 @@ client.on('interactionCreate', async (interaction) => {
       }
       const meter = statsText(sessionStats(s.dir));
       const parts = splitForDiscord(`# ${s.title} — ${s.date}\n${recap}${meter ? `\n\n${meter}` : ''}${siteConfigured() ? websiteLine() : ''}`);
+      await interaction.editReply(parts[0]);
+      for (const p of parts.slice(1)) await interaction.followUp(p);
+      return;
+    }
+
+    if (commandName === 'game') {
+      const sub = interaction.options.getSubcommand();
+      if (sub === 'books') {
+        const books = listBooks();
+        if (!books.length) return interaction.reply({ content: '📚 No rulebooks yet. Add PDFs in Note Tiger → **Library**.', flags: MessageFlags.Ephemeral });
+        const list = books.map((b) => `• **${b.title}**${b.indexed ? ` · ${b.pages} pages` : ' · *still reading…*'}${b.noText ? ' · ⚠️ no readable text (scanned?)' : ''}`).join('\n');
+        return interaction.reply(splitForDiscord(`📚 **Rulebooks I can search (${books.length})**\n${list}`)[0]);
+      }
+      const question = interaction.options.getString('question');
+      await interaction.deferReply();
+      const { answer, hits } = await askBooks(question);
+      const parts = splitForDiscord(`> 📖 ${question}\n${answer}`);
       await interaction.editReply(parts[0]);
       for (const p of parts.slice(1)) await interaction.followUp(p);
       return;

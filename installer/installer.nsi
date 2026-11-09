@@ -127,6 +127,9 @@ Section "Uninstall"
   RMDir /r "$INSTDIR\app\models"
   RMDir /r "$INSTDIR\app\logs"
   RMDir /r "$INSTDIR\app\site"
+  MessageBox MB_YESNO|MB_ICONQUESTION "Also delete your rulebook library (the PDFs you added)?" /SD IDNO IDNO keepBooks
+    RMDir /r "$INSTDIR\app\library"
+  keepBooks:
   Delete "$INSTDIR\app\*.js"
   Delete "$INSTDIR\app\*.html"
   Delete "$INSTDIR\app\*.png"

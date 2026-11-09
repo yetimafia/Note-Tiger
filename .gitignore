@@ -10,3 +10,4 @@ dist/
 launcher/*.exe
 launcher/*.res
 window/*.syso
+library/
