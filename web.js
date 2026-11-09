@@ -25,6 +25,7 @@ export const SETTINGS = [
   { key: 'SITE_REPO' },
   { key: 'GITHUB_TOKEN', secret: true },
   { key: 'SITE_PASSWORD', secret: true },
+  { key: 'SITE_SHARE_PASSWORD' },
 ];
 
 function readEnvLines() {

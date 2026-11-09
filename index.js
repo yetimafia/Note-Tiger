@@ -28,7 +28,15 @@ import {
   sessionStats, statsText, sessionDir,
 } from './store.js';
 import { askAI, recapSession, buildArchive, ASK_SYSTEM, AI_LABEL, getProgress } from './ai.js';
-import { publishSite, siteConfigured } from './site.js';
+import { publishSite, siteConfigured, siteUrl } from './site.js';
+import { SITE_PASSWORD, SITE_SHARE_PASSWORD } from './config.js';
+
+// "🌐 Read it on the website: <link> · 🔑 Password: ||secret||" (the password is a Discord spoiler).
+function websiteLine(url = siteUrl(), withPassword = SITE_SHARE_PASSWORD) {
+  if (!url) return '';
+  const pw = withPassword && SITE_PASSWORD ? ` · 🔑 Password: ||${SITE_PASSWORD.replace(/\|/g, '')}||` : '';
+  return `\n\n🌐 **Read it color-coded on the player website:** ${url}${pw}`;
+}
 
 console.log(`Starting bot. Recap AI: ${AI_LABEL}`);
 const MIN_UTTERANCE_SEC = 0.6;   // ignore coughs and clicks
@@ -274,11 +282,12 @@ async function publishSession(guild, channel, dir, meta, recap, { updated = fals
   const lines = sessionLines(dir);
   const tag = updated ? '🔁 **Updated**\n' : '';
   // Publish to the player website first, so the Discord posts can link to it.
-  let siteLink = '';
+  let siteLink = '', siteUrlOk = null;
   if (siteConfigured()) {
     try {
       const r = await publishSite({ dirs: [dir] });
-      siteLink = `\n\n🌐 *Read it color-coded on the player website:* ${r.url}`;
+      siteUrlOk = r.url;
+      siteLink = `\n🌐 Color-coded on the player website: ${r.url}`;
     } catch (err) {
       console.error('[website]', err.message);
     }
@@ -319,7 +328,7 @@ async function publishSession(guild, channel, dir, meta, recap, { updated = fals
     const allFiles = logPosted ? [] : attachments();
     const recapFiles = allFiles.slice(0, 1);
     const meter = statsText(sessionStats(dir));
-    const text = `${tag}# ${meta.title} — ${meta.date}\n${recap}${meter ? `\n\n${meter}` : ''}${pointer}${siteLink}`;
+    const text = `${tag}# ${meta.title} — ${meta.date}\n${recap}${meter ? `\n\n${meter}` : ''}${pointer}${siteUrlOk ? websiteLine(siteUrlOk) : ''}`;
     if (recapChannel) {
       try { await sendLong(recapChannel, text, recapFiles); recapPosted = recapChannel; }
       catch (err) {
@@ -560,7 +569,7 @@ client.on('interactionCreate', async (interaction) => {
         catch (err) { return interaction.editReply(err.message); }
       }
       const meter = statsText(sessionStats(s.dir));
-      const parts = splitForDiscord(`# ${s.title} — ${s.date}\n${recap}${meter ? `\n\n${meter}` : ''}`);
+      const parts = splitForDiscord(`# ${s.title} — ${s.date}\n${recap}${meter ? `\n\n${meter}` : ''}${siteConfigured() ? websiteLine() : ''}`);
       await interaction.editReply(parts[0]);
       for (const p of parts.slice(1)) await interaction.followUp(p);
       return;

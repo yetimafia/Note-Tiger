@@ -275,6 +275,8 @@
         <label for="SITE_PASSWORD">Group password</label>
         <input type="password" id="SITE_PASSWORD" autocomplete="new-password">
         <div class="hint">What players type to open the site. At least 8 characters; a few words is best (e.g. <i>redmond barrens chummer</i>). Changing it re-encrypts everything, and the old password stops working.</div>
+        <label class="switch" style="margin-top:12px"><input type="checkbox" id="SITE_SHARE_PASSWORD"> Post the link and password under each recap in Discord</label>
+        <div class="hint">The password is hidden behind a spoiler (click to reveal). Anyone who can see your recap channel can read it.</div>
         <div class="row" style="margin-top:12px">
           <button class="btn ghost" id="publishAllBtn" type="button">Publish all sessions now</button>
           <span class="hint" id="siteHint"></span>
@@ -666,6 +668,7 @@ async function loadSettings() {
   $('#SKIP_OPENING_RECAP').checked = s.SKIP_OPENING_RECAP !== 'false';
   $('#SITE_ENABLED').checked = s.SITE_ENABLED === 'true';
   $('#SITE_REPO').value = s.SITE_REPO || '';
+  $('#SITE_SHARE_PASSWORD').checked = s.SITE_SHARE_PASSWORD !== 'false';
   $('#GITHUB_TOKEN').value = ''; $('#GITHUB_TOKEN').placeholder = s.GITHUB_TOKEN.set ? '•••••••• saved' : 'github_pat_…';
   $('#SITE_PASSWORD').value = ''; $('#SITE_PASSWORD').placeholder = s.SITE_PASSWORD.set ? '•••••••• saved' : 'Choose a group password';
   $('#siteBox').hidden = !$('#SITE_ENABLED').checked;
@@ -690,6 +693,7 @@ $('#saveBtn').addEventListener('click', async () => {
     SKIP_OPENING_RECAP: $('#SKIP_OPENING_RECAP').checked ? 'true' : 'false',
     SITE_ENABLED: $('#SITE_ENABLED').checked ? 'true' : 'false',
     SITE_REPO: $('#SITE_REPO').value.trim(),
+    SITE_SHARE_PASSWORD: $('#SITE_SHARE_PASSWORD').checked ? 'true' : 'false',
     GITHUB_TOKEN: $('#GITHUB_TOKEN').value.trim(),
     SITE_PASSWORD: $('#SITE_PASSWORD').value,
     LOG_CHANNEL: $('#LOG_CHANNEL').value.replace(/^#/, '').trim() || 'logs',
