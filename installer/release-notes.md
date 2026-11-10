@@ -1,5 +1,7 @@
-**New in 2.7.1**
-- 🛠️ Fix: the bot could crash while loading the speech model ("The given version [30] is not supported") after some Windows updates. Note Tiger's speech engine now uses its own copy of its files no matter what Windows has installed.
-- 🐯 New icon: a sharp, snarling tiger with a cyber-eye (desktop shortcut, tray icon, window, installer and player website)
+**New in 2.7.2**
+- 🐿️ Squirrel-o-meter fix: table talk is now spotted a stretch of conversation at a time, so the meter actually catches the YouTube, other-games and real-life tangents (before, the local AI called almost everything "game"). Rules, dice rolls, character building and lore still count as playing.
+  To update an old session's meter: Sessions → pick the session → **Rewrite recap**.
+
+Also in 2.7.1: fix for the speech-model crash after some Windows updates, and the new snarling tiger icon.
 
 Your settings, sessions and rulebooks are kept when you update.

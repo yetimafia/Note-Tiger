@@ -12,6 +12,7 @@ import {
 } from './store.js';
 import { updateCampaign, updateStory, rulesSection } from './campaign.js';
 import { knownNames } from './spelling.js';
+import { findTableTalk } from './squirrel.js';
 
 // ---------- progress (shown as a progress bar in Note Tiger) ----------
 // Key: "<server id>/<session id>". Stages: tagging 0–70%, opening recap 70–75%, notes and recap 75–99%, contacts 99–100%.
@@ -164,11 +165,11 @@ export function applyTags(lines, raw, playerNames = []) {
 export async function tagLines(dir, { force = false } = {}) {
   const lines = sessionLines(dir);
   const saved = readJSON(path.join(dir, 'labels.json'), {});
-  if (!force && saved.tagVersion === 2 && saved.lineCount === lines.length) {
+  if (!force && saved.tagVersion === 3 && saved.lineCount === lines.length) {
     return { offTopic: new Set(saved.offTopic || []), voices: new Map(Object.entries(saved.voices || {})) };
   }
   if (lines.length === 0 || (!SEPARATE_TABLE_TALK && !lines.some((l) => l.gm))) {
-    updateLabels(dir, { tagVersion: 2, lineCount: lines.length, offTopic: [], voices: {}, voiceLineCount: lines.length });
+    updateLabels(dir, { tagVersion: 3, lineCount: lines.length, offTopic: [], voices: {}, voiceLineCount: lines.length });
     return { offTopic: new Set(), voices: new Map() };
   }
   // Names that can't be NPCs: the people at the table and their runners.
@@ -187,8 +188,8 @@ export async function tagLines(dir, { force = false } = {}) {
       .map((l) => `(earlier) ${l.gm ? '[GM] ' : ''}${l.speaker}: ${l.text}`).join('\n');
     const body = lines.slice(start, end).map((l, k) => `L${start + k} ${l.gm ? '[GM] ' : ''}${l.speaker}: ${l.text}`).join('\n');
     const knownPart = known.size ? `Characters the GM has voiced so far: ${[...known].slice(-15).join(', ')}\n\n` : '';
-    if (start % (size * 10) === 0) console.log(`[tagging] lines ${start + 1}–${Math.min(start + size * 10, lines.length)} of ${lines.length}`);
-    setProgress(dir, 0, 70, start / lines.length, `Sorting game vs. table talk and GM voices: line ${start + 1} of ${lines.length}`);
+    if (start % (size * 10) === 0) console.log(`[GM voices] lines ${start + 1}–${Math.min(start + size * 10, lines.length)} of ${lines.length}`);
+    setProgress(dir, 0, 50, start / lines.length, `Working out who the GM is voicing: line ${start + 1} of ${lines.length}`);
     try {
       const answer = await askAI(TAG_SYSTEM, `${knownPart}${context ? `${context}\n\n` : ''}LABEL THESE LINES:\n${body}`, size * 12);
       const tags = parseTags(answer);
@@ -204,8 +205,21 @@ export async function tagLines(dir, { force = false } = {}) {
   }
   if (!SEPARATE_TABLE_TALK) for (const k of Object.keys(raw)) if (raw[k].tag === 'T') raw[k] = { tag: lines[k].gm ? 'N' : 'G' };
   const { offTopic, voices } = applyTags(lines, raw, playerNames);
+  // Table talk: judged a stretch at a time (much more reliable than line by line, especially for local models).
+  if (SEPARATE_TABLE_TALK) {
+    try {
+      const found = await findTableTalk(lines, askAI, {
+        isGM: (l) => l.gm,
+        log: (m) => console.log(m),
+        onProgress: (i, n) => setProgress(dir, 50, 70, i / n, `Spotting table talk: part ${i} of ${n}`),
+      });
+      for (const i of found) offTopic.add(lineKey(lines[i]));
+    } catch (err) {
+      console.error('[squirrels] skipped:', err.message);
+    }
+  }
   updateLabels(dir, {
-    tagVersion: 2, lineCount: lines.length, voiceLineCount: lines.length,
+    tagVersion: 3, lineCount: lines.length, voiceLineCount: lines.length,
     offTopic: [...offTopic], voices: Object.fromEntries(voices),
   });
   const npcs = [...new Set([...voices.values()].filter((v) => v !== 'GM' && v !== 'Narrator'))];
