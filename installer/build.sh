@@ -38,6 +38,19 @@ rm -rf "$STAGE"/app/node_modules/pdfjs-dist/{web,types,build,image_decoders,webp
 # Windows ships an older onnxruntime.dll in System32. Put the speech engine's own DLLs next to node.exe,
 # which Windows searches first, so the right version is always loaded.
 cp "$STAGE"/app/node_modules/onnxruntime-node/bin/napi-v6/win32/x64/*.dll "$STAGE/runtime/"
+# Some Windows updates make Windows hand out its own built-in (older) onnxruntime.dll no matter which folder asks.
+# So Note Tiger's copy gets a name of its own, and the speech engine is pointed at that name (same length, so the
+# file layout doesn't change).
+ORTDIR="$STAGE/app/node_modules/onnxruntime-node/bin/napi-v6/win32/x64"
+node -e '
+  const fs = require("fs"), f = process.argv[1];
+  const b = fs.readFileSync(f), from = Buffer.from("onnxruntime.dll"), to = Buffer.from("nt-onnxrt30.dll");
+  const at = b.indexOf(from);
+  if (at < 0 || b.indexOf(from, at + 1) >= 0) { console.error("onnxruntime.dll import not found exactly once"); process.exit(1); }
+  to.copy(b, at); fs.writeFileSync(f, b);
+' "$ORTDIR/onnxruntime_binding.node"
+cp "$ORTDIR/onnxruntime.dll" "$ORTDIR/nt-onnxrt30.dll"
+cp "$ORTDIR/onnxruntime.dll" "$STAGE/runtime/nt-onnxrt30.dll"
 
 echo "==> Launcher"
 (cd launcher \

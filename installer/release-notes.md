@@ -1,9 +1,5 @@
-**New in 2.7.0**
-- ✨ Automatic updates: Note Tiger tells you when a new version is out and updates itself in one click
-- 🏃 Runner profiles: what each character has done, big moments, gear and how they're doing (`/campaign runner`)
-- 🔎 Search every session on the player website
-- 🎲 GM prep note before game night (`/campaign prep`, or automatically: Settings → Game night)
-
-Also includes 2.4–2.6: rulebook page pictures, contacts, places, loose ends, rules calls, story so far, quotes, spotlight meter, spelling fixes, catch-up, backups.
+**New in 2.7.1**
+- 🛠️ Fix: the bot could crash while loading the speech model ("The given version [30] is not supported") after some Windows updates. Note Tiger's speech engine now uses its own copy of its files no matter what Windows has installed.
+- 🐯 New icon: a sharp, snarling tiger with a cyber-eye (desktop shortcut, tray icon, window, installer and player website)
 
 Your settings, sessions and rulebooks are kept when you update.
