@@ -104,6 +104,15 @@
   .srh { font-size: 16px; margin-bottom: 4px; }
   .srh a { color: var(--bright); font-weight: 700; }
   .sr .more { display: inline-block; margin-top: 4px; font-size: 14px; }
+  .timeline { border-left: 2px solid var(--line); margin: 14px 0 0 66px; }
+  .tli { display: flex; gap: 12px; margin: 0 0 12px -68px; }
+  .tli .when { width: 66px; white-space: nowrap; flex: none; text-align: right; font: 12px ui-monospace, Consolas, monospace; color: var(--dim); display: flex; flex-direction: column; }
+  .tli .when span { font-size: 11px; }
+  .tli .what { flex: 1; min-width: 0; background: var(--panel); border: 1px solid var(--line); border-left: 3px solid var(--accent); border-radius: 8px; padding: 8px 12px; }
+  .tli.sq .what { background: none; border: 0; border-left: 3px solid var(--line); padding: 2px 12px; border-radius: 0; }
+  .tli .what ul { margin: 6px 0; padding-left: 18px; font-size: 14px; color: var(--dim); }
+  .tli .what a { font-size: 13px; }
+  .ln.flash { background: rgba(255,170,40,.22); border-radius: 4px; transition: background 2s; }
   .qt { background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--accent); border-radius: 10px; padding: 12px 16px; margin: 8px 0; }
   .qt .qx { color: var(--bright); font-size: 16px; }
   .qt .qb { color: var(--dim); font-size: 13px; margin-top: 4px; }
@@ -212,6 +221,7 @@ function nav(on) {
   const nR = t.reduce((a, x) => a + (x.runners || []).length, 0);
   return `<div class="nav">${link('', '📼 Sessions')}${link('search', '🔎 Search')}${hasStory ? link('story', '📖 Story so far') : ''}${nR ? link('runners', `🏃 Runners (${nR})`) : ''}
     ${link('contacts', `🕵️ Contacts${nC ? ` (${nC})` : ''}`)}${nP ? link('places', `📍 Places (${nP})`) : ''}
+    ${t.some((x) => (x.jobs || []).length) ? link('runs', `🗂️ Runs (${t.reduce((a, x) => a + (x.jobs || []).length, 0)})`) : ''}
     ${link('threads', `🧵 Loose ends${nO ? ` (${nO})` : ''}`)}${nQ ? link('quotes', `💬 Quotes (${nQ})`) : ''}</div>`;
 }
 
@@ -301,6 +311,22 @@ async function showSearch() {
   $('#sq').oninput = () => { clearTimeout(timer); timer = setTimeout(run, 200); };
   if (searchQ) run();
   $('#sq').focus();
+}
+
+function showRuns() {
+  const t = (manifest.trackers || []);
+  const many = t.length > 1;
+  const icon = { done: '✅', failed: '❌', 'in progress': '🏃', offered: '📨', 'turned down': '🚫' };
+  app.innerHTML = header() + `<div class="wrap">${nav('runs')}<h2 class="page">Run history</h2>
+    <p class="sub">Every job the team has been offered or taken, newest first.</p>
+    ${t.map((tr) => (tr.jobs || []).length ? `${many ? `<div class="server">${esc(tr.server)}</div>` : ''}
+      ${tr.jobs.map((j) => `<div class="npc"><div><span class="nm">${icon[j.status] || '•'} ${esc(j.name)}</span>${j.status ? ` <span class="att">${esc(j.status)}</span>` : ''}</div>
+        ${j.johnson ? `<div class="who">Hired by ${esc(j.johnson)}</div>` : ''}${j.task ? `<div style="margin-top:6px">${esc(j.task)}</div>` : ''}
+        <ul>${j.payOffered ? `<li>💰 Offered: ${esc(j.payOffered)}</li>` : ''}${j.payReceived ? `<li>💵 Got: ${esc(j.payReceived)}</li>` : ''}
+        ${j.complications ? `<li>⚠️ ${esc(j.complications)}</li>` : ''}${j.outcome ? `<li>🏁 ${esc(j.outcome)}</li>` : ''}</ul>
+        <div class="met">${esc(j.first?.title || '')}${j.last?.title && j.last.title !== j.first?.title ? ` → ${esc(j.last.title)}` : ''}</div></div>`).join('')}` : '').join('')
+      || '<div class="empty">No runs yet.</div>'}
+    <footer>Note Tiger · encrypted archive</footer></div>`;
 }
 
 function showStory() {
@@ -426,13 +452,26 @@ async function showSession(id) {
       ${st.topSquirrels?.length ? `<div class="sub" style="margin:6px 0 0">Biggest squirrels: ${st.topSquirrels.filter((t) => t.ms >= 60000).map((t) => `${esc(t.name)} ${fmtDur(t.ms)}`).join(', ')}</div>` : ''}
       ${st.combatMs == null ? '' : `<div class="sub" style="margin:6px 0 0">⚔️ ${st.combatMs > 60000 ? `In combat: <b>${fmtDur(st.combatMs)}</b>` : 'No combat this session'}</div>`}
       ${spotlight(st, s)}</div>` : ''}
-    <div class="tabs"><button class="tab" data-t="recap">Recap</button><button class="tab" data-t="transcript">Transcript</button></div>
+    <div class="tabs"><button class="tab" data-t="recap">Recap</button>${s.timeline ? '<button class="tab" data-t="timeline">Timeline</button>' : ''}<button class="tab" data-t="transcript">Transcript</button></div>
     <div id="body"></div></div>`;
   app.querySelectorAll('.tab').forEach((b) => b.onclick = () => { view.tab = b.dataset.t; render(); });
   function render() {
     app.querySelectorAll('.tab').forEach((b) => b.classList.toggle('on', b.dataset.t === view.tab));
     const body = $('#body');
     if (view.tab === 'recap') { body.innerHTML = s.recap ? `<div class="recap">${md(s.recap)}</div>` : '<div class="empty">No recap for this session.</div>'; return; }
+    if (view.tab === 'timeline' && s.timeline) {
+      const mins = (a, b) => Math.max(1, Math.round((b - a) / 60000));
+      body.innerHTML = `<div class="timeline">${s.timeline.map((x) => x.kind === 'squirrel'
+        ? `<div class="tli sq"><div class="when">${clock(x.t0)}</div><div class="what">🐿️ <span class="sub">Off-topic for ${mins(x.t0, x.t1)} min</span></div></div>`
+        : `<div class="tli"><div class="when">${clock(x.t0)}<span>${mins(x.t0, x.t1)} min</span></div>
+            <div class="what"><b>${x.combat ? '⚔️ ' : ''}${esc(x.scene)}</b>
+            ${x.events.length ? `<ul>${x.events.map((e) => `<li>${esc(e)}</li>`).join('')}</ul>` : ''}
+            <a href="#" data-jump="${x.t0}">Read this part →</a></div></div>`).join('')}</div>`;
+      body.querySelectorAll('[data-jump]').forEach((a) => a.onclick = (e) => {
+        e.preventDefault(); view.tab = 'transcript'; view.q = ''; view.tt = true; view.jump = Number(a.dataset.jump); render();
+      });
+      return;
+    }
     body.innerHTML = `<div class="tools"><input type="search" id="q" placeholder="Search the transcript…" value="${esc(view.q)}">
       ${tt ? `<label><input type="checkbox" id="tt" ${view.tt ? 'checked' : ''}> Table talk (${tt})</label>` : ''}
       ${rc ? `<label><input type="checkbox" id="rc" ${view.rc ? 'checked' : ''}> Opening recap (${rc})</label>` : ''}</div><div id="lines"></div>`;
@@ -455,8 +494,13 @@ async function showSession(id) {
     }
     $('#lines').innerHTML = groups.length ? groups.map((g) => `<div class="b ${g.o || g.r ? 'dim' : ''} ${g.k === 'n' ? 'note' : ''}" style="border-left-color:${g.c}">
       <div class="n" style="color:${g.c}">${esc(g.name)}${g.o ? '<span class="tag">table talk</span>' : g.r ? '<span class="tag">recap of last session</span>' : ''}</div>
-      ${g.lines.map((e) => `<div class="ln"><span class="tm">${clock(e.t)}</span>${hl(e.x)}</div>`).join('')}</div>`).join('')
+      ${g.lines.map((e) => `<div class="ln" data-t="${e.t}"><span class="tm">${clock(e.t)}</span>${hl(e.x)}</div>`).join('')}</div>`).join('')
       : `<div class="empty">${needle ? 'No lines match your search.' : 'Nothing to show.'}</div>`;
+    if (view.jump) {
+      const el = [...$('#lines').querySelectorAll('.ln')].find((x) => Number(x.dataset.t) >= view.jump);
+      view.jump = null;
+      if (el) { el.scrollIntoView({ block: 'center' }); el.classList.add('flash'); }
+    }
   }
   render();
   window.scrollTo(0, 0);
@@ -469,6 +513,7 @@ function route() {
   if (id === 'contacts') return showContacts();
   if (id === 'threads') return showThreads();
   if (id === 'story') return showStory();
+  if (id === 'runs') return showRuns();
   if (id === 'runners') return showRunners();
   if (id === 'search') return showSearch();
   if (id === 'places') return showPlaces();
