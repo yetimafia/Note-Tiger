@@ -859,11 +859,13 @@ function openLog() {
 
 // ---------- rulebook library ----------
 let libTimer = null;
+let libBookList = [];
 async function loadLibrary() {
   clearTimeout(libTimer);
   api('/api/settings').then((st) => { $('#libImages').checked = st.LIB_PAGE_IMAGES !== 'false'; }).catch(() => {});
   const lib = await api('/api/library').catch((e) => { toast(e.message); return null; });
   if (!lib) return;
+  libBookList = lib.books;
   const p = lib.progress;
   $('#libProg').innerHTML = p ? `<div class="prog"><b>📖 Reading ${esc(p.title || p.file)}…${p.pages ? ` ${Math.round((p.page / p.pages) * 100)}%` : ''}</b>
     <div class="track"><div class="fill" style="width:${p.pages ? Math.max(2, (p.page / p.pages) * 100) : 2}%"></div></div>
@@ -915,12 +917,26 @@ $('#libAsk').onclick = async () => {
   try {
     const r = await api('/api/library/ask', { method: 'POST', body: { question: q } });
     $('#libOut').innerHTML = `<div class="answer recap">${md(r.answer)}</div>` +
-      (r.cited ? `<div style="margin-top:12px"><div class="hint" style="margin-bottom:6px">📄 ${esc(r.cited.title)}, ${esc(r.cited.pageLabel)}</div>
-        <img src="/api/library/page?book=${encodeURIComponent(r.cited.book)}&page=${r.cited.page}" alt="Page picture" style="max-width:100%;border-radius:8px;border:1px solid var(--line);background:#fff" loading="lazy"></div>` : '') +
+      (r.cited ? `<div style="margin-top:12px" id="libPage"></div>` : '') +
       (r.hits.length ? `<div class="hint" style="margin-top:8px">Searched pages: ${r.hits.map((h) => `${esc(h.title)} ${esc(h.pageLabel)}`).join(' · ')}</div>` : '');
+    if (r.cited) showLibPage(r.cited, r.cited.page);
   } catch (err) { $('#libOut').innerHTML = `<div class="banner err" style="margin-top:12px">${esc(err.message)}</div>`; }
   btn.disabled = false;
 };
+// The cited page as a picture, with buttons for the page before and after (rules often run across pages).
+function showLibPage(cited, page) {
+  const book = libBookList.find((b) => b.key === cited.book);
+  const last = book?.pages || Infinity;
+  const shift = page - cited.page;
+  const label = cited.printed ? `p. ${cited.printed + shift}` : `PDF page ${page}`;
+  $('#libPage').innerHTML = `<div class="row" style="justify-content:space-between;margin-bottom:6px">
+      <button class="btn ghost" type="button" id="libPrev" ${page <= 1 ? 'disabled' : ''}>◀ Previous page</button>
+      <span class="hint">📄 ${esc(cited.title)}, ${esc(label)}</span>
+      <button class="btn ghost" type="button" id="libNext" ${page >= last ? 'disabled' : ''}>Next page ▶</button></div>
+    <img src="/api/library/page?book=${encodeURIComponent(cited.book)}&page=${page}" alt="Page picture" style="max-width:100%;border-radius:8px;border:1px solid var(--line);background:#fff">`;
+  $('#libPrev').onclick = () => showLibPage(cited, page - 1);
+  $('#libNext').onclick = () => showLibPage(cited, page + 1);
+}
 $('#libQ').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('#libAsk').click(); });
 
 // ---------- sessions ----------

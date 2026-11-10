@@ -157,6 +157,14 @@ export async function renderPage(key, pdfPage, width = 1100) {
 }
 
 // The page an answer is mainly about: the first page it cites, matched to a search hit.
+// Title, page count and printed page label for one PDF page (for the page-turn buttons).
+export function pageInfo(key, pdfPage) {
+  const idx = readIndex(key);
+  if (!idx) return null;
+  const printed = idx.offset === null || idx.offset === undefined ? null : pdfPage - idx.offset;
+  return { title: idx.title, pages: idx.pages, page: pdfPage, pageLabel: printed && printed > 0 ? `p. ${printed}` : `PDF page ${pdfPage}` };
+}
+
 export function citedHit(answer, hits) {
   const m = String(answer).match(/(?:\bp\.\s*(\d+)|PDF page (\d+))/i);
   if (m) {

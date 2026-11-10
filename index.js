@@ -14,7 +14,15 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {
-  Client, GatewayIntentBits, SlashCommandBuilder, AttachmentBuilder, MessageFlags, EmbedBuilder,
+  Client,
+  GatewayIntentBits,
+  SlashCommandBuilder,
+  AttachmentBuilder,
+  MessageFlags,
+  EmbedBuilder,
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
 } from 'discord.js';
 import {
   joinVoiceChannel, EndBehaviorType, VoiceConnectionStatus, entersState, getVoiceConnection,
@@ -29,7 +37,7 @@ import {
 } from './store.js';
 import { askAI, recapSession, buildArchive, ASK_SYSTEM, AI_LABEL, getProgress } from './ai.js';
 import { publishSite, siteConfigured, siteUrl } from './site.js';
-import { askBooks, listBooks, renderPage } from './library.js';
+import { askBooks, listBooks, renderPage, pageInfo } from './library.js';
 import { buildCampaign, addEdit, campaignSummary, logRulesCall, npcKey, latestStory, allQuotes, gmPrep } from './campaign.js';
 import { knownNames } from './spelling.js';
 import { SITE_PASSWORD, SITE_SHARE_PASSWORD, LIB_PAGE_IMAGES, USE_CLAUDE, PREP_ENABLED, GAME_DAY, GAME_TIME, PREP_HOURS } from './config.js';
@@ -537,7 +545,37 @@ client.once('clientReady', async () => {
 });
 client.on('guildCreate', (guild) => guild.commands.set(commands).catch(() => {}));
 
+// A rulebook page as a picture, with buttons to turn to the page before or after
+// (an answer can land on a page where the rule starts or ends mid-way).
+async function pagePicture(book, pdfPage) {
+  const info = pageInfo(book, pdfPage) || { title: 'Rulebook', pages: pdfPage, pageLabel: `PDF page ${pdfPage}` };
+  const png = await renderPage(book, pdfPage);
+  const name = `${info.title} ${info.pageLabel}`.replace(/[^\w .-]+/g, '').replace(/\s+/g, '_').slice(0, 80);
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(`pg|${book}|${pdfPage - 1}`).setLabel('◀ Previous page').setStyle(ButtonStyle.Secondary).setDisabled(pdfPage <= 1),
+    new ButtonBuilder().setCustomId(`pg|${book}|${pdfPage}|now`).setLabel(`${info.title.slice(0, 50)} · ${info.pageLabel}`).setStyle(ButtonStyle.Secondary).setDisabled(true),
+    new ButtonBuilder().setCustomId(`pg|${book}|${pdfPage + 1}`).setLabel('Next page ▶').setStyle(ButtonStyle.Secondary).setDisabled(pdfPage >= info.pages),
+  );
+  return { files: [new AttachmentBuilder(png, { name: `${name}.png` })], components: [row] };
+}
+
 client.on('interactionCreate', async (interaction) => {
+  // Page-turn buttons under a rulebook picture: swap the picture for the page before or after.
+  if (interaction.isButton() && interaction.customId.startsWith('pg|')) {
+    const [, book, page] = interaction.customId.split('|');
+    try {
+      await interaction.deferUpdate();
+      const { files, components } = await pagePicture(book, Number(page));
+      await interaction.editReply({ files, attachments: [], components });
+    } catch (err) {
+      console.error('[library] page turn:', err.message);
+      await interaction.followUp({
+        content: `Couldn't turn the page: ${err.message} (If the rulebooks changed since, ask again with \`/game ask\`.)`,
+        flags: MessageFlags.Ephemeral,
+      }).catch(() => {});
+    }
+    return;
+  }
   if (!interaction.isChatInputCommand()) return;
   const { guild, commandName } = interaction;
   const gid = guild.id;
@@ -655,19 +693,20 @@ client.on('interactionCreate', async (interaction) => {
         catch (err) { console.error('[rules calls]', err.message); }
       }
       // A picture of the main page it cites, so everyone can read the actual rules and tables.
-      let files = [];
+      let files = [], components = [];
       if (cited && LIB_PAGE_IMAGES) {
         try {
-          const png = await renderPage(cited.book, cited.page);
-          const name = `${cited.title} ${cited.pageLabel}`.replace(/[^\w .-]+/g, '').replace(/\s+/g, '_').slice(0, 80);
-          files = [new AttachmentBuilder(png, { name: `${name}.png` })];
+          ({ files, components } = await pagePicture(cited.book, cited.page));
         } catch (err) {
           console.error('[library] page picture:', err.message);
         }
       }
       const parts = splitForDiscord(`> 📖 ${question}\n${answer}`);
-      await interaction.editReply({ content: parts[0], files: parts.length === 1 ? files : [] });
-      for (let i = 1; i < parts.length; i++) await interaction.followUp({ content: parts[i], files: i === parts.length - 1 ? files : [] });
+      const last = parts.length - 1;
+      await interaction.editReply({ content: parts[0], files: last === 0 ? files : [], components: last === 0 ? components : [] });
+      for (let i = 1; i < parts.length; i++) {
+        await interaction.followUp({ content: parts[i], files: i === last ? files : [], components: i === last ? components : [] });
+      }
       return;
     }
 

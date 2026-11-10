@@ -1,8 +1,6 @@
-**New in 2.7.3**
-- 🧠 Game tracker: Note Tiger now follows the night in order, remembering where the runners are, whether a real fight is going on, and what actually happened (as the GM narrates it). The recap writer gets this log, so jokes like "he got shot and died" don't end up in the recap as real events.
-- ⚔️ Fights only count when initiative is rolled. The squirrel-o-meter now shows combat time (or "No combat this session").
-- 🐿️ Table talk detection runs as its own pass again (it got worse when mixed with the story tracking).
+**New in 2.7.4**
+- 📖 Page-turn buttons for `/game ask`: under the rulebook picture there are now **◀ Previous page** and **Next page ▶** buttons, for when a rule starts or ends on the next page. Anyone in the channel can use them. The Library tab's "Try a lookup" has them too.
 
-To update an old session: Sessions → pick the session → **Rewrite recap**.
+Also recent: the game tracker (no more jokes about dying in recaps), combat time in the squirrel-o-meter, and the new tiger icon.
 
 Your settings, sessions and rulebooks are kept when you update.
