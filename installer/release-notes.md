@@ -1,11 +1,7 @@
-**New in 2.8.0**
-- ✏️ **Fix the AI's mistakes:** Sessions → Transcript → turn on "Fix mistakes", click a line (Shift-click for a stretch), then mark it 🐿️ Table talk / 🎲 Game, or set who the GM was voicing. Then click the banner to quickly rewrite the recap with your fixes. Fixes stick, even when the recap is rewritten later.
-- 🗓️ **Session timeline:** a Timeline tab (in Note Tiger and on the player website) shows the night scene by scene, with squirrel breaks. Click a scene to read that part of the transcript.
-- 🗂️ **Run history:** every job: who hired you, the task, pay offered and received, complications and how it ended. `/campaign runs`, the Campaign tab, and a Runs page on the website.
-- 🎭 **NPC voice cards (GM only):** how the GM has played each NPC: personality, how they talk, what they want, what they know about the team, memorable lines. `/campaign npc name:Grim`. Never put on the player website.
-- 📕 **Campaign book:** the whole campaign as a PDF: story, runners, runs, contacts, places, every recap, best lines. `/campaign book` or the button in the Campaign tab.
-- 🚨 **Alerts:** a Discord DM to you if the bot crashes, nothing has been heard for 15 minutes while people are in voice, or a recap fails. Settings → Alerts has a test button.
-- 🎲 **#gm channel:** the game-night prep note and an after-session GM digest (NPC cards updated, the run in progress, open loose ends) post in #gm. `/campaign prep` and `/campaign npc` answer openly there and privately everywhere else.
+**New in 2.8.1**
+- 🎭 **Much better NPC voices with the local AI.** A new pass reads the conversation in order, remembering who's in the scene, who introduced themselves ("my name is Grim"), and who the players are talking to ("What do you got for us, Mr. Graham?"). On a real session it went from finding no NPCs at all to finding Grim, Wendy and Max. Sound-alike spellings (Grim / Grimm / Graham) are merged into one NPC.
+- ⚡ **Faster recaps:** the old line-by-line tagging pass is gone (the new passes do its job better).
+- The NPC voice cards now have real lines to learn from.
 
-Old sessions: click **Rewrite recap** to get their timeline, runs and NPC cards.
+To update an old session: Sessions → pick the session → **Rewrite recap**. Anything you fixed by hand stays fixed.
 Your settings, sessions and rulebooks are kept when you update.
