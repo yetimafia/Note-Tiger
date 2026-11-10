@@ -93,6 +93,17 @@
   .npc ul { margin: 8px 0 0; padding-left: 20px; font-size: 14px; }
   .npc li { margin: 3px 0; }
   .npc .met { color: var(--dim); font-size: 12px; margin-top: 6px; }
+  .runner { background: var(--panel); border: 1px solid var(--line); border-top: 4px solid var(--accent2); border-radius: 10px; padding: 14px 16px; margin: 10px 0; }
+  .runner .rn { font-weight: 800; font-size: 18px; }
+  .runner .rh { color: var(--bright); font-weight: 600; margin-top: 10px; font-size: 14px; }
+  .runner ul { margin: 6px 0 0; padding-left: 20px; font-size: 14px; }
+  .runner li { margin: 3px 0; }
+  .runner .gear { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 6px; }
+  .runner .gear span { font-size: 12px; background: var(--bg); border: 1px solid var(--line); border-radius: 99px; padding: 1px 9px; }
+  .sr { margin: 18px 0; }
+  .srh { font-size: 16px; margin-bottom: 4px; }
+  .srh a { color: var(--bright); font-weight: 700; }
+  .sr .more { display: inline-block; margin-top: 4px; font-size: 14px; }
   .qt { background: var(--panel); border: 1px solid var(--line); border-left: 4px solid var(--accent); border-radius: 10px; padding: 12px 16px; margin: 8px 0; }
   .qt .qx { color: var(--bright); font-size: 16px; }
   .qt .qb { color: var(--dim); font-size: 13px; margin-top: 4px; }
@@ -111,7 +122,7 @@
   .spin { width: 26px; height: 26px; border: 3px solid var(--line); border-top-color: var(--accent); border-radius: 50%; animation: r 1s linear infinite; margin: 60px auto; }
   @keyframes r { to { transform: rotate(360deg); } }
   footer { color: var(--dim); font-size: 12px; text-align: center; margin-top: 40px; }
-  @media (max-width: 600px) { .campaign { display: none; } .recap { padding: 4px 14px 10px; } }
+  @media (max-width: 600px) { .nav { flex-wrap: nowrap; overflow-x: auto; padding-bottom: 4px; scrollbar-width: none; } .nav a { white-space: nowrap; } .campaign { display: none; } .recap { padding: 4px 14px 10px; } }
 </style>
 </head>
 <body>
@@ -198,7 +209,8 @@ function nav(on) {
   const nP = t.reduce((a, x) => a + (x.places || []).length, 0), nQ = t.reduce((a, x) => a + (x.quotes || []).length, 0);
   const hasStory = t.some((x) => x.story);
   const link = (id, label) => `<a href="#${id}" class="${on === (id || 'list') ? 'on' : ''}">${label}</a>`;
-  return `<div class="nav">${link('', '📼 Sessions')}${hasStory ? link('story', '📖 Story so far') : ''}
+  const nR = t.reduce((a, x) => a + (x.runners || []).length, 0);
+  return `<div class="nav">${link('', '📼 Sessions')}${link('search', '🔎 Search')}${hasStory ? link('story', '📖 Story so far') : ''}${nR ? link('runners', `🏃 Runners (${nR})`) : ''}
     ${link('contacts', `🕵️ Contacts${nC ? ` (${nC})` : ''}`)}${nP ? link('places', `📍 Places (${nP})`) : ''}
     ${link('threads', `🧵 Loose ends${nO ? ` (${nO})` : ''}`)}${nQ ? link('quotes', `💬 Quotes (${nQ})`) : ''}</div>`;
 }
@@ -224,6 +236,71 @@ function showContacts() {
   };
   $('#cq').oninput = draw;
   draw();
+}
+
+function showRunners() {
+  const t = (manifest.trackers || []);
+  const many = t.length > 1;
+  app.innerHTML = header() + `<div class="wrap">${nav('runners')}<h2 class="page">Runners</h2>
+    <p class="sub">What each runner has been up to, built from the recaps.</p>
+    ${t.map((tr) => (tr.runners || []).length ? `${many ? `<div class="server">${esc(tr.server)}</div>` : ''}
+      ${tr.runners.map((r) => `<div class="runner" style="border-top-color:${r.color || 'var(--accent2)'}">
+        <div class="rn" style="color:${r.color || 'var(--bright)'}">${esc(r.name)}</div>
+        <div class="sub" style="margin:0">${r.player ? `Played by ${esc(r.player)} · ` : ''}${r.sessions.length} session${r.sessions.length === 1 ? '' : 's'}${r.first?.title ? ` since ${esc(r.first.title)}` : ''}</div>
+        ${r.status ? `<div style="margin-top:8px">Right now: <b>${esc(r.status)}</b></div>` : ''}
+        ${r.sessions.some((x) => x.moment) ? `<div class="rh">⭐ Big moments</div><ul>${r.sessions.filter((x) => x.moment).slice(-5).map((x) => `<li>${esc(x.moment)} <span class="sub">(${esc(x.title)})</span></li>`).join('')}</ul>` : ''}
+        ${r.gear?.length ? `<div class="rh">🧰 Gear &amp; chrome</div><div class="gear">${r.gear.slice(-16).map((g) => `<span>${esc(g)}</span>`).join('')}</div>` : ''}
+        <details><summary class="rh" style="cursor:pointer">📼 Session by session</summary><ul>${r.sessions.slice().reverse().map((x) => `<li><span class="tm">${esc(x.date)}</span>${esc(x.did)}${x.talkPct != null ? ` <span class="sub">· 🔦 ${x.talkPct}%</span>` : ''}</li>`).join('')}</ul></details>
+      </div>`).join('')}` : '').join('') || '<div class="empty">No runner profiles yet.</div>'}
+    <footer>Note Tiger · encrypted archive</footer></div>`;
+}
+
+// Search every session: decrypts them all once (cached), then searches lines and recaps.
+let searchQ = '';
+async function showSearch() {
+  app.innerHTML = header() + `<div class="wrap">${nav('search')}<h2 class="page">Search all sessions</h2>
+    <p class="sub">Every transcript and recap. Try a name, a place, or a line you half remember.</p>
+    <div class="tools"><input type="search" id="sq" placeholder="e.g. Sticks, Big Rhino, “not a bad plan”" value="${esc(searchQ)}" autofocus></div>
+    <div id="sstate" class="sub"></div><div id="sres"></div>
+    <footer>Note Tiger · encrypted archive</footer></div>`;
+  const all = manifest.sessions;
+  let loaded = 0;
+  const need = all.filter((m) => !cache.has(m.id));
+  if (need.length) {
+    $('#sstate').textContent = `Unlocking sessions… 0 of ${need.length}`;
+    await Promise.all(need.map(async (m) => {
+      try { cache.set(m.id, await decryptFile(`data/${m.file}`)); } catch {}
+      loaded++;
+      if ($('#sstate')) $('#sstate').textContent = `Unlocking sessions… ${loaded} of ${need.length}`;
+    }));
+  }
+  if (!$('#sq')) return;   // navigated away
+  $('#sstate').textContent = '';
+  const run = () => {
+    searchQ = $('#sq').value;
+    const q = searchQ.trim().toLowerCase().replace(/[“”"]/g, '');
+    if (q.length < 2) { $('#sres').innerHTML = '<div class="empty">Type at least 2 letters.</div>'; return; }
+    const re = new RegExp(esc(q).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
+    const hl = (t) => esc(t).replace(re, (m) => `<mark>${m}</mark>`);
+    let total = 0;
+    const blocks = [...all].reverse().map((m) => {
+      const s = cache.get(m.id); if (!s) return '';
+      const hits = s.entries.filter((e) => e.x.toLowerCase().includes(q) || e.s.toLowerCase().includes(q));
+      const inRecap = (s.recap || '').toLowerCase().includes(q);
+      if (!hits.length && !inRecap) return '';
+      total += hits.length;
+      const recapLine = inRecap ? (() => { const line = s.recap.split('\n').find((l) => l.toLowerCase().includes(q)) || ''; return `<div class="b note" style="border-left-color:var(--accent)"><div class="n" style="color:var(--accent)">From the recap</div><div class="ln">${hl(line.replace(/[*#]/g, '').trim().slice(0, 300))}</div></div>`; })() : '';
+      return `<div class="sr"><div class="srh"><a href="#${m.id}" data-q="${esc(q)}" class="open">${esc(s.title)}</a> <span class="sub">· ${esc(niceDate(s.date))} · ${hits.length} line${hits.length === 1 ? '' : 's'}</span></div>
+        ${recapLine}${hits.slice(0, 6).map((e) => `<div class="b ${e.o || e.r ? 'dim' : ''}" style="border-left-color:${e.c || '#C8CCD4'}"><div class="n" style="color:${e.c || '#C8CCD4'}">${esc(e.s)}${e.o ? '<span class="tag">table talk</span>' : ''}</div><div class="ln"><span class="tm">${clock(e.t)}</span>${hl(e.x)}</div></div>`).join('')}
+        ${hits.length > 6 ? `<a href="#${m.id}" data-q="${esc(q)}" class="open more">Show all ${hits.length} in this session →</a>` : ''}</div>`;
+    }).join('');
+    $('#sres').innerHTML = blocks ? `<div class="sub">${total} matching line${total === 1 ? '' : 's'}</div>${blocks}` : '<div class="empty">Nothing found.</div>';
+    $('#sres').querySelectorAll('a.open').forEach((a) => a.onclick = () => { view = { ...view, tab: 'transcript', q: a.dataset.q }; });
+  };
+  let timer = null;
+  $('#sq').oninput = () => { clearTimeout(timer); timer = setTimeout(run, 200); };
+  if (searchQ) run();
+  $('#sq').focus();
 }
 
 function showStory() {
@@ -391,6 +468,8 @@ function route() {
   if (id === 'contacts') return showContacts();
   if (id === 'threads') return showThreads();
   if (id === 'story') return showStory();
+  if (id === 'runners') return showRunners();
+  if (id === 'search') return showSearch();
   if (id === 'places') return showPlaces();
   if (id === 'quotes') return showQuotes();
   id ? showSession(id) : showList();
