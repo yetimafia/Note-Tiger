@@ -12,7 +12,7 @@ import {
 } from './store.js';
 import { updateCampaign, updateStory, rulesSection } from './campaign.js';
 import { knownNames } from './spelling.js';
-import { findTableTalk } from './squirrel.js';
+import { findTableTalk, gameLogText } from './squirrel.js';
 
 // ---------- progress (shown as a progress bar in Note Tiger) ----------
 // Key: "<server id>/<session id>". Stages: tagging 0–70%, opening recap 70–75%, notes and recap 75–99%, contacts 99–100%.
@@ -84,7 +84,9 @@ function chunkText(text, size) {
 const CHUNK_NOTES_SYSTEM = `You take notes for a Shadowrun tabletop RPG game from a messy speech-to-text transcript.
 List, as short bullet points, only what happened in the game: events, decisions, NPCs met (with names), places,
 the job and payment, nuyen/karma/loot, injuries and consequences, open leads, and any very memorable quotes.
-Lines labeled "(GM as <name>)" are the game master voicing that NPC. Skip out-of-character chatter. Do not invent anything.`;
+Lines labeled "(GM as <name>)" are the game master voicing that NPC. Skip out-of-character chatter. Do not invent anything.
+Players joke and talk big a lot ("I shoot him", "he's dead", "we all die"): only note a fight, injury or death if the GM
+narrates it or the GAME LOG says it happened.`;
 
 // ---------- line tagging: game vs table talk, and who the GM is voicing ----------
 // One pass over the transcript in small chunks. Each line gets a label; small local models are far more
@@ -205,20 +207,23 @@ export async function tagLines(dir, { force = false } = {}) {
   }
   if (!SEPARATE_TABLE_TALK) for (const k of Object.keys(raw)) if (raw[k].tag === 'T') raw[k] = { tag: lines[k].gm ? 'N' : 'G' };
   const { offTopic, voices } = applyTags(lines, raw, playerNames);
-  // Table talk: judged a stretch at a time (much more reliable than line by line, especially for local models).
-  if (SEPARATE_TABLE_TALK) {
-    try {
-      const found = await findTableTalk(lines, askAI, {
-        isGM: (l) => l.gm,
-        log: (m) => console.log(m),
-        onProgress: (i, n) => setProgress(dir, 50, 70, i / n, `Spotting table talk: part ${i} of ${n}`),
-      });
-      for (const i of found) offTopic.add(lineKey(lines[i]));
-    } catch (err) {
-      console.error('[squirrels] skipped:', err.message);
-    }
+  // Game tracker: reads the night a stretch at a time with a running memory of the game, to spot table talk,
+  // real fights, and what actually happened (much more reliable than line by line for local models).
+  let sceneLog = [], combat = [];
+  try {
+    const found = await findTableTalk(lines, askAI, {
+      isGM: (l) => l.gm,
+      log: (m) => console.log(m),
+      onProgress: (i, n) => setProgress(dir, 50, 70, i / n, `Following the game (table talk, fights, events): part ${i} of ${n}`),
+    });
+    if (SEPARATE_TABLE_TALK) for (const i of found) offTopic.add(lineKey(lines[i]));
+    sceneLog = found.verdicts.map((v) => ({ ...v, t0: lines[v.from].t, t1: lines[v.to - 1].t }));
+    combat = [...found.combat].map((i) => lineKey(lines[i]));
+  } catch (err) {
+    console.error('[game tracker] skipped:', err.message);
   }
   updateLabels(dir, {
+    sceneLog, combat,
     tagVersion: 3, lineCount: lines.length, voiceLineCount: lines.length,
     offTopic: [...offTopic], voices: Object.fromEntries(voices),
   });
@@ -298,7 +303,10 @@ async function writeRecap(title, date, gameText, tableText, prevRecap, dir = nul
   const prevPart = prevRecap ? `For context, here is the PREVIOUS session's recap:\n${prevRecap}\n\n---\n\n` : '';
   const names = dir ? knownNames(gidOf(dir)) : '';
   const namesPart = names ? `Correct spellings of names in this campaign (the transcript may mangle them): ${names}\n\n` : '';
-  const head = `${prevPart}${namesPart}Session title: ${title} (${date})\n\n`;
+  const log = dir ? gameLogText(readJSON(path.join(dir, 'labels.json'), {}).sceneLog) : '';
+  const logPart = log ? `GAME LOG (built while following the whole session; trust it for whether fights, injuries and deaths ` +
+    `really happened, since players joke about those a lot):\n${log}\n\n---\n\n` : '';
+  const head = `${prevPart}${namesPart}${logPart}Session title: ${title} (${date})\n\n`;
   const tablePart = tableText ? `\n\n---\n${TABLE_TALK_NOTE}\n${tableTalkCandidates(tableText, USE_CLAUDE ? 60_000 : 6_000)}` : '';
   const chunks = chunkText(gameText || '(no in-game talk was transcribed)', RECAP_CHUNK_CHARS);
   if (chunks.length === 1) {
@@ -310,7 +318,7 @@ async function writeRecap(title, date, gameText, tableText, prevRecap, dir = nul
     console.log(`[recap] notes for part ${i + 1}/${chunks.length}`);
     step(i / (chunks.length + 1), `Taking notes: part ${i + 1} of ${chunks.length}`);
     notes.push(`--- Part ${i + 1} of ${chunks.length} ---\n` +
-      await askAI(CHUNK_NOTES_SYSTEM, `TRANSCRIPT PART ${i + 1}:\n${chunks[i]}`, 1200));
+      await askAI(CHUNK_NOTES_SYSTEM, `${log ? `GAME LOG FOR THE WHOLE SESSION (for context):\n${log.slice(0, 3000)}\n\n` : ''}TRANSCRIPT PART ${i + 1}:\n${chunks[i]}`, 1200));
   }
   step(chunks.length / (chunks.length + 1), 'Writing the recap from the notes');
   return askAI(RECAP_SYSTEM,
@@ -387,6 +395,8 @@ using only the game transcript. Use Discord markdown, and these sections (skip a
 They can come from the game OR the table talk; mark table-talk quotes with (table talk).
 
 Rules: never invent facts. If something is unclear from the transcript, say it's unclear rather than guessing.
+Players joke about shooting, stabbing and dying all the time. Only report a fight, injury or death if the GAME LOG or the
+GM's narration confirms it; if the GAME LOG says there was no combat, there were no fights, injuries from fights or deaths.
 Never mention anything from the table talk outside Best Lines. Ignore rules arguments unless they changed something in the game.`;
 
 export const ASK_SYSTEM = `You are the campaign scribe for ${CAMPAIGN_NAME}, a Shadowrun tabletop RPG game.

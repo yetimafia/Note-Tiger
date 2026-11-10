@@ -237,6 +237,10 @@ export function sessionStats(dir) {
   if (lines.length < 2) return null;
   const meta = readJSON(path.join(dir, 'meta.json'), {});
   const { offTopic, recap } = readLabels(dir);
+  const labelsRaw = readJSON(path.join(dir, 'labels.json'), {});
+  const combatSet = new Set(labelsRaw.combat || []);
+  const tracked = Array.isArray(labelsRaw.sceneLog) && labelsRaw.sceneLog.length > 0;
+  let combatMs = 0;
   // Recording start/end count as quiet time, but only if they're close to the first/last line.
   const near = (v, ref) => (Number.isFinite(v) && Math.abs(v - ref) < 30 * 60_000 ? v : ref);
   const start = Math.min(lines[0].t, near(Date.parse(meta.startedAt), lines[0].t));
@@ -252,6 +256,7 @@ export function sessionStats(dir) {
     const counted = Math.min(gap, 120_000);
     ms[kind] += counted;
     ms.quiet += gap - counted;
+    if (kind === 'game' && combatSet.has(lineKey(l))) combatMs += counted;
     if (kind === 'squirrel') squirrels[baseName(l.speaker)] = (squirrels[baseName(l.speaker)] || 0) + counted;
     // Spotlight: how long each player talked during the game (their own speaking time, not the gaps).
     if (kind === 'game') {
@@ -276,6 +281,7 @@ export function sessionStats(dir) {
     gamePct: pct(ms.game), squirrelPct: pct(ms.squirrel), recapPct: pct(ms.recap), quietPct: pct(ms.quiet),
     topSquirrels: top,
     spotlight, gmTalkMs: Math.round(gmTalk), playerTalkMs: Math.round(playerTalk),
+    combatMs: tracked ? combatMs : null,
   };
 }
 
@@ -296,10 +302,11 @@ export function statsText(stats) {
   ].filter(Boolean);
   const top = stats.topSquirrels[0] && stats.topSquirrels[0].ms >= 60_000
     ? `\nBiggest squirrel: **${stats.topSquirrels[0].name}** (${formatDuration(stats.topSquirrels[0].ms)})` : '';
+  const fight = stats.combatMs == null ? '' : stats.combatMs > 60_000 ? `\n⚔️ In combat: **${formatDuration(stats.combatMs)}**` : '\n⚔️ No combat this session';
   const sp = (stats.spotlight || []).filter((p) => p.pct >= 1);
   const spot = sp.length >= 2
     ? `\n**🔦 Spotlight** (who talked in the game): ${sp.map((p) => `${p.runner || p.name} ${p.pct}%`).join(' · ')}` : '';
-  return `**🐿️ Squirrel-o-meter** · ${formatDuration(stats.totalMs)} session\n${rows.join('\n')}${top}${spot}`;
+  return `**🐿️ Squirrel-o-meter** · ${formatDuration(stats.totalMs)} session\n${rows.join('\n')}${top}${fight}${spot}`;
 }
 
 // The recap of the session before this one (for context), if there is one.

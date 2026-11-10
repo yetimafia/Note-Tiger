@@ -1027,7 +1027,8 @@ function renderMeter(st, colors = {}) {
   return `<div class="meter"><b>🐿️ Squirrel-o-meter</b> <span class="hint">· ${fmtDur(st.totalMs)} session</span>
     <div class="bar">${parts.map(([c, l, , p]) => `<span style="width:${p}%;background:${c}" title="${l}: ${p}%"></span>`).join('')}</div>
     <div class="legend">${parts.map(([c, l, ms, p]) => `<span><i style="background:${c}"></i>${l} <b>${fmtDur(ms)}</b> (${p}%)</span>`).join('')}</div>
-    ${top ? `<div class="hint" style="margin-top:6px">Biggest squirrels: ${top}</div>` : ''}${renderSpotlight(st, colors)}</div>`;
+    ${top ? `<div class="hint" style="margin-top:6px">Biggest squirrels: ${top}</div>` : ''}
+    ${st.combatMs == null ? '' : `<div class="hint" style="margin-top:6px">⚔️ ${st.combatMs > 60000 ? `In combat: <b>${fmtDur(st.combatMs)}</b>` : 'No combat this session'}</div>`}${renderSpotlight(st, colors)}</div>`;
 }
 // Who got the spotlight: each player's share of the talking during the game (the GM is left out).
 function renderSpotlight(st, colors) {

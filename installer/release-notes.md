@@ -1,7 +1,8 @@
-**New in 2.7.2**
-- 🐿️ Squirrel-o-meter fix: table talk is now spotted a stretch of conversation at a time, so the meter actually catches the YouTube, other-games and real-life tangents (before, the local AI called almost everything "game"). Rules, dice rolls, character building and lore still count as playing.
-  To update an old session's meter: Sessions → pick the session → **Rewrite recap**.
+**New in 2.7.3**
+- 🧠 Game tracker: Note Tiger now follows the night in order, remembering where the runners are, whether a real fight is going on, and what actually happened (as the GM narrates it). The recap writer gets this log, so jokes like "he got shot and died" don't end up in the recap as real events.
+- ⚔️ Fights only count when initiative is rolled. The squirrel-o-meter now shows combat time (or "No combat this session").
+- 🐿️ Table talk detection runs as its own pass again (it got worse when mixed with the story tracking).
 
-Also in 2.7.1: fix for the speech-model crash after some Windows updates, and the new snarling tiger icon.
+To update an old session: Sessions → pick the session → **Rewrite recap**.
 
 Your settings, sessions and rulebooks are kept when you update.

@@ -424,6 +424,7 @@ async function showSession(id) {
       <div class="legend">${[['#7bd88f', 'Playing the game', st.gameMs, st.gamePct], ['#f5a524', 'Squirrels', st.squirrelMs, st.squirrelPct], ['#9be7ef', 'Recap of last session', st.recapMs, st.recapPct], ['#5c6370', 'Quiet / breaks', st.quietMs, st.quietPct]]
         .filter((p) => p[3] > 0).map(([c, l, ms, p]) => `<span><i style="background:${c}"></i>${l} <b>${fmtDur(ms)}</b> (${p}%)</span>`).join('')}</div>
       ${st.topSquirrels?.length ? `<div class="sub" style="margin:6px 0 0">Biggest squirrels: ${st.topSquirrels.filter((t) => t.ms >= 60000).map((t) => `${esc(t.name)} ${fmtDur(t.ms)}`).join(', ')}</div>` : ''}
+      ${st.combatMs == null ? '' : `<div class="sub" style="margin:6px 0 0">⚔️ ${st.combatMs > 60000 ? `In combat: <b>${fmtDur(st.combatMs)}</b>` : 'No combat this session'}</div>`}
       ${spotlight(st, s)}</div>` : ''}
     <div class="tabs"><button class="tab" data-t="recap">Recap</button><button class="tab" data-t="transcript">Transcript</button></div>
     <div id="body"></div></div>`;
