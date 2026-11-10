@@ -29,6 +29,8 @@ export const SKIP_OPENING_RECAP = e.SKIP_OPENING_RECAP !== 'false';
 const channelName = (v, fallback) => (v ?? fallback).replace(/^#/, '').trim().toLowerCase();
 export const RECAP_CHANNEL = channelName(e.RECAP_CHANNEL, 'recaps');
 export const LOG_CHANNEL = channelName(e.LOG_CHANNEL, 'logs');
+// Private channel for the game master: prep notes and NPC voice-card updates go here.
+export const GM_CHANNEL = channelName(e.GM_CHANNEL, 'gm');
 // Player website (GitHub Pages, encrypted with the group password).
 export const SITE_ENABLED = e.SITE_ENABLED === 'true';
 export const SITE_PASSWORD = e.SITE_PASSWORD || '';
@@ -49,6 +51,9 @@ export const PREP_HOURS = Math.max(1, Math.min(72, Number(e.PREP_HOURS || 3)));
 // Updates: checks the GitHub releases of this repository for a newer Note Tiger.
 export const UPDATE_REPO = e.UPDATE_REPO || 'yetimafia/Note-Tiger';
 export const UPDATE_CHECK = e.UPDATE_CHECK !== 'false';
+// Alerts by Discord DM when something goes wrong (to the bot's owner, or this user ID).
+export const ALERTS_ENABLED = e.ALERTS_ENABLED !== 'false';
+export const ALERT_USER_ID = /^\d{15,25}$/.test((e.ALERT_USER_ID || '').trim()) ? e.ALERT_USER_ID.trim() : '';
 // Attach a picture of the cited rulebook page to /game ask answers.
 export const LIB_PAGE_IMAGES = e.LIB_PAGE_IMAGES !== 'false';
 // Discord role(s) that mark the game master / storyteller (comma-separated, not case-sensitive).

@@ -19,6 +19,13 @@ Built for Shadowrun, and it works for any game played over Discord voice.
 - 🏃 **Runner profiles**: what each character has done, big moments, gear and how they're doing
 - 🔎 **Search every session** on the player website
 - 🎲 **GM prep note**: privately messaged to the GM before game night (or `/campaign prep` any time)
+- ✏️ **Fix the AI's mistakes**: in the transcript, select lines and mark them table talk / game, or set who the GM was voicing
+- 🗓️ **Session timeline**: scene by scene, with squirrel breaks; click a scene to read that part
+- 🗂️ **Run history**: every job, who hired you, pay, complications and outcome (`/campaign runs`)
+- 🎭 **NPC voice cards for the GM**: personality, how they talk, what they want, their lines (`/campaign npc`, GM only)
+- 📕 **Campaign book**: the whole campaign as a PDF (`/campaign book`, or the Campaign tab)
+- 🚨 **Alerts**: a Discord DM if the bot crashes, can't hear anyone, or a recap fails
+- 🎲 **#gm channel**: prep notes and NPC card updates go to a private GM channel
 - ✨ **Automatic updates**: Note Tiger tells you when there's a new version and updates itself in one click
 - 📚 **Rulebook lookup**: add your game PDFs, then `/game ask` tells you the book, the printed page number and a quick description
 - 🧠 Answers questions about past sessions: *"What did Mr. Johnson offer us for the Ares job?"*

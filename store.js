@@ -85,11 +85,72 @@ export const lineKey = (l) => `${l.t}:${l.speaker}`;
 // which lines were off-topic table talk, and who the GM was voicing on each GM line.
 export function readLabels(dir) {
   const l = readJSON(path.join(dir, 'labels.json'), {});
+  const offTopic = new Set(l.offTopic || []);              // off-topic table talk
+  const voices = new Map(Object.entries(l.voices || {}));  // who the GM is voicing
+  // Fixes made by hand in Note Tiger win over the AI, and survive rewriting the recap.
+  const manual = l.manual || {};
+  for (const [k, v] of Object.entries(manual.offTopic || {})) { if (v) offTopic.add(k); else offTopic.delete(k); }
+  for (const [k, v] of Object.entries(manual.voices || {})) voices.set(k, v);
   return {
-    offTopic: new Set(l.offTopic || []),              // off-topic table talk
-    voices: new Map(Object.entries(l.voices || {})),  // who the GM is voicing
-    recap: new Set(l.recapLines || []),               // the group retelling last session at the start
+    offTopic, voices,
+    recap: new Set(l.recapLines || []),                    // the group retelling last session at the start
+    manualCount: Object.keys(manual.offTopic || {}).length + Object.keys(manual.voices || {}).length,
   };
+}
+
+// Scene-by-scene timeline of a session, from the game tracker's log (labels.sceneLog): stretches with the same
+// scene are merged, off-topic stretches become squirrel breaks.
+const STOP = new Set(['the', 'and', 'are', 'with', 'their', 'they', 'runners', 'team', 'players', 'still', 'now', 'while', 'about', 'from', 'into', 'near']);
+const words4 = (t) => new Set(String(t || '').toLowerCase().replace(/[^a-z0-9 ]+/g, ' ').split(/\s+/).filter((w) => w.length > 2 && !STOP.has(w)));
+function sameScene(a, b) {
+  const norm = (t) => String(t || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+  if (norm(a) && norm(a) === norm(b)) return true;
+  const A = words4(a), B = words4(b);
+  if (!A.size || !B.size) return false;
+  let n = 0;
+  for (const w of A) if (B.has(w)) n++;
+  return n / Math.min(A.size, B.size) >= 0.5;
+}
+export function sessionTimeline(dir) {
+  const log = readJSON(path.join(dir, 'labels.json'), {}).sceneLog;
+  if (!Array.isArray(log) || !log.length) return null;
+  const out = [];
+  for (const v of log) {
+    const last = out.at(-1);
+    if (!v.playing) {
+      if (last?.kind === 'squirrel') last.t1 = v.t1;
+      else out.push({ kind: 'squirrel', t0: v.t0, t1: v.t1 });
+      continue;
+    }
+    // A short squirrel break inside one scene doesn't split it in two.
+    const prevScene = last?.kind === 'squirrel' && out.at(-2)?.kind === 'scene' && last.t1 - last.t0 < 5 * 60_000 ? out.at(-2) : null;
+    const target = last?.kind === 'scene' && sameScene(last.scene, v.scene) ? last : prevScene && sameScene(prevScene.scene, v.scene) ? prevScene : null;
+    if (target) {
+      if (target === prevScene) out.pop();
+      target.t1 = v.t1;
+      if (v.happened) target.events.push(v.happened);
+      target.combat = target.combat || Boolean(v.combat);
+      target.scene = v.scene || target.scene;   // latest wording is usually the most complete
+    } else {
+      out.push({ kind: 'scene', t0: v.t0, t1: v.t1, scene: v.scene || 'Scene unclear', events: v.happened ? [v.happened] : [], combat: Boolean(v.combat) });
+    }
+  }
+  return out;
+}
+
+// Hand fixes for some lines: offTopic true/false (or null to go back to the AI's call),
+// voice 'Narrator' / 'GM' (out of character) / an NPC name (or null to go back to the AI's call).
+export function fixLines(dir, keys, { offTopic, voice } = {}) {
+  const file = path.join(dir, 'labels.json');
+  const l = readJSON(file, {});
+  const manual = { offTopic: {}, voices: {}, ...(l.manual || {}) };
+  for (const k of keys) {
+    if (offTopic === null) delete manual.offTopic[k];
+    else if (typeof offTopic === 'boolean') manual.offTopic[k] = offTopic;
+    if (voice === null) delete manual.voices[k];
+    else if (typeof voice === 'string' && voice.trim()) manual.voices[k] = voice.trim().slice(0, 60);
+  }
+  writeJSON(file, { ...l, manual });
 }
 export const readTableTalk = (dir) => readLabels(dir).offTopic;
 export const readVoices = (dir) => readLabels(dir).voices;
@@ -113,7 +174,7 @@ export function transcriptEntries(lines, notes = [], labels = {}) {
   const { offTopic = new Set(), voices = new Map(), recap = new Set() } = labels;
   return [
     ...lines.map((l) => ({
-      t: l.t, kind: 'say', speaker: displaySpeaker(l, voices), text: l.text,
+      t: l.t, key: lineKey(l), kind: 'say', speaker: displaySpeaker(l, voices), text: l.text,
       offTopic: offTopic.has(lineKey(l)), recap: recap.has(lineKey(l)) && !offTopic.has(lineKey(l)),
       gm: Boolean(l.gm), voice: voices.get(lineKey(l)) || null,
     })),
@@ -163,10 +224,12 @@ export function readSession(gid, id) {
     transcript: formatTranscript(lines, notes, labels),
     entries,
     tableTalkLines: labels.offTopic.size,
+    manualFixes: labels.manualCount,
     recapLines: entries.filter((e) => e.recap).length,
     playStartedAt: meta.playStartedAt ?? null,
     stats: sessionStats(dir),
     colors,
+    timeline: sessionTimeline(dir),
   };
 }
 

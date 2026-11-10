@@ -40,7 +40,9 @@ import { publishSite, siteConfigured, siteUrl } from './site.js';
 import { askBooks, listBooks, renderPage, pageInfo } from './library.js';
 import { buildCampaign, addEdit, campaignSummary, logRulesCall, npcKey, latestStory, allQuotes, gmPrep } from './campaign.js';
 import { knownNames } from './spelling.js';
-import { SITE_PASSWORD, SITE_SHARE_PASSWORD, LIB_PAGE_IMAGES, USE_CLAUDE, PREP_ENABLED, GAME_DAY, GAME_TIME, PREP_HOURS } from './config.js';
+import { campaignBook } from './book.js';
+import { sendAlert } from './alerts.js';
+import { SITE_PASSWORD, SITE_SHARE_PASSWORD, LIB_PAGE_IMAGES, USE_CLAUDE, GM_CHANNEL, PREP_ENABLED, GAME_DAY, GAME_TIME, PREP_HOURS } from './config.js';
 
 const CATCHUP_SYSTEM = `You help a Shadowrun tabletop RPG player catch up on what they missed. You get the last few minutes of a
 messy speech-to-text transcript of the live session. In 3–8 short bullet points (Discord markdown), say what happened in the
@@ -157,6 +159,7 @@ function listenTo(guild, connection, userId) {
         const line = { t: startedAt, d: Math.round(seconds * 10) / 10, speaker: speakerLabel(guild.id, who), text };
         if (isGM(who)) line.gm = true;
         rec.lines.push(line);
+        rec.lastLineAt = Date.now();
         fs.appendFileSync(path.join(rec.dir, 'transcript.jsonl'), JSON.stringify(line) + '\n');
       } catch (err) {
         console.error('[transcribe]', err.message);
@@ -294,6 +297,7 @@ async function stopSession(guild, channel, reason) {
   } catch (err) {
     console.error('[recap]', err);
     await channel.send(`The recap failed (${err.message}), but the transcript was saved. Fix that and run \`/recap\`.`);
+    sendAlert('recap', `📝 **The recap for "${rec.meta.title}" failed:** ${err.message}\nThe transcript is saved. Once that's fixed, open Note Tiger → Sessions → **Write recap**.`);
   }
 
   await publishSession(guild, channel, rec.dir, rec.meta, recap);
@@ -369,6 +373,27 @@ async function publishSession(guild, channel, dir, meta, recap, { updated = fals
   } else if (!logPosted) {
     await sendWithFiles(home, `${tag}📜 Transcript: ${meta.title}`, attachments());
     logPosted = home;
+  }
+
+  // GM digest in the GM channel: NPC voice cards that changed, open loose ends, the run in progress.
+  if (!updated && recap) {
+    const gmChan = findChannel(guild, GM_CHANNEL);
+    if (gmChan) {
+      try {
+        const cards = readJSON(path.join(dir, 'voices.json'), {});
+        const c = buildCampaign(guild.id);
+        const run = c.jobs.find((j) => j.status === 'in progress' || j.status === 'offered');
+        const bits = [`🎲 **GM notes: ${meta.title}**`];
+        const names = Object.keys(cards);
+        if (names.length) bits.push(`🎭 **NPC voice cards updated:**\n${names.map((n) => `• **${n}**${cards[n].personality ? `: ${cards[n].personality}` : ''}`).join('\n')}\n*Full card: \`/campaign npc name:<npc>\`*`);
+        if (run) bits.push(`🗂️ **Run in progress:** ${run.name}${run.johnson ? ` (for ${run.johnson})` : ''}${run.complications ? `\n⚠️ ${run.complications}` : ''}`);
+        if (c.open.length) bits.push(`🧵 **${c.open.length} open loose end${c.open.length === 1 ? '' : 's'}**, newest: ${c.open.slice(-3).map((t) => t.text).join(' · ')}`);
+        bits.push('*Prep note for next time: `/campaign prep`*');
+        await sendLong(gmChan, bits.join('\n\n'));
+      } catch (err) {
+        console.error('[gm digest]', err.message);
+      }
+    }
   }
 
   // Short note where the command was used, so people know where to look.
@@ -475,6 +500,10 @@ function transcriptAttachments(file, baseName, title = 'Session') {
 }
 
 // A text channel by name (from Settings), if the bot can see it.
+// Used in the GM channel: GM-only answers can be visible there (it's private to the GM).
+const inGmChannel = (interaction) => Boolean(GM_CHANNEL && interaction.channel?.name?.toLowerCase() === GM_CHANNEL);
+const gmOnly = (interaction) => (inGmChannel(interaction) ? {} : { flags: MessageFlags.Ephemeral });
+
 function findChannel(guild, name) {
   if (!name) return null;
   return guild.channels.cache.find((c) => c.isTextBased?.() && !c.isThread?.() && !c.isVoiceBased?.() &&
@@ -514,9 +543,13 @@ const commands = [
     .addSubcommand((s) => s.setName('places').setDescription('Places the team has been (or details on one)')
       .addStringOption((o) => o.setName('name').setDescription('Show one place, e.g. "The Big Rhino"')))
     .addSubcommand((s) => s.setName('story').setDescription('The story of the campaign so far'))
+    .addSubcommand((s) => s.setName('runs').setDescription('Every job the team has taken: who hired you, pay, how it went'))
+    .addSubcommand((s) => s.setName('book').setDescription('The whole campaign as a PDF book: story, runners, runs, every recap'))
     .addSubcommand((s) => s.setName('runner').setDescription('A runner\'s profile: what they\'ve done, big moments, gear')
       .addStringOption((o) => o.setName('name').setDescription('Runner name (leave empty for everyone)')))
     .addSubcommand((s) => s.setName('prep').setDescription('GM prep note for the next session (only you see it)'))
+    .addSubcommand((s) => s.setName('npc').setDescription('GM only: how you\'ve played an NPC (personality, voice, lines)')
+      .addStringOption((o) => o.setName('name').setDescription('NPC name, e.g. Grim').setRequired(true)))
     .addSubcommand((s) => s.setName('quote').setDescription('A random Best Line from past sessions')
       .addStringOption((o) => o.setName('search').setDescription('Only quotes containing this (word or name)')))
     .addSubcommand((s) => s.setName('threads').setDescription('Open loose ends: leads, debts, promises, threats'))
@@ -762,17 +795,50 @@ client.on('interactionCreate', async (interaction) => {
           `${r.sessions.length} session${r.sessions.length === 1 ? '' : 's'} since *${r.first?.title}*${r.status ? `\nRight now: **${r.status}**` : ''}` +
           `${r.gear.length ? `\n🧰 ${r.gear.slice(-12).join(', ')}` : ''}${moments ? `\n\n⭐ **Big moments**\n${moments}` : ''}\n\n📼 **Recent sessions**\n${did}`);
       }
+      if (sub === 'npc') {
+        const anyGmRole = guild.roles.cache.some((r) => GM_ROLES.includes(r.name.toLowerCase()));
+        if (anyGmRole && !isGM(interaction.member) && !inGmChannel(interaction)) return interaction.reply({ content: `NPC voice cards are for the game master (try it in #${GM_CHANNEL}).`, flags: MessageFlags.Ephemeral });
+        const k = npcKey(interaction.options.getString('name'));
+        const n = k && (c.contacts.find((x) => x.key === k) || c.contacts.find((x) => x.key.includes(k) || k.includes(x.key)));
+        if (!n) return interaction.reply({ content: 'I don\'t know that NPC. `/campaign contacts` lists everyone.', flags: MessageFlags.Ephemeral });
+        const card = n.card;
+        const text = `🎭 **${n.name}**${n.who ? ` — ${n.who}` : ''}${n.attitude ? `\nAttitude to the team: **${n.attitude}**` : ''}\n` +
+          (card ? `${card.personality ? `\n**Personality:** ${card.personality}` : ''}${card.speech ? `\n**How they talk:** ${card.speech}` : ''}` +
+            `${card.wants ? `\n**Wants:** ${card.wants}` : ''}${card.knows ? `\n**Knows about the team:** ${card.knows}` : ''}` +
+            `${card.lines?.length ? `\n**Lines:**\n${card.lines.map((l) => `> ${l}`).join('\n')}` : ''}`
+            : '\n*No voice card yet: it\'s built from lines the GM speaks as this NPC (they need to be tagged as "GM as …" in the transcript).*') +
+          `${n.history.length ? `\n\n**History:**\n${n.history.slice(-5).map((h) => `• *${h.title}:* ${h.text}`).join('\n')}` : ''}`;
+        const parts = splitForDiscord(text);
+        await interaction.reply({ content: parts[0], ...gmOnly(interaction) });
+        for (const p of parts.slice(1)) await interaction.followUp({ content: p, ...gmOnly(interaction) });
+        return;
+      }
       if (sub === 'prep') {
         const member = interaction.member;
         const anyGmRole = guild.roles.cache.some((r) => GM_ROLES.includes(r.name.toLowerCase()));
-        if (anyGmRole && !isGM(member)) return interaction.reply({ content: 'The prep note is for the game master (it may suggest plot hooks).', flags: MessageFlags.Ephemeral });
-        await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+        if (anyGmRole && !isGM(member) && !inGmChannel(interaction)) return interaction.reply({ content: 'The prep note is for the game master (it may suggest plot hooks). Ask in #' + GM_CHANNEL + '.', flags: MessageFlags.Ephemeral });
+        await interaction.deferReply(gmOnly(interaction));
         const note = await gmPrep(gid, askAI);
         if (!note) return interaction.editReply('Nothing to prep from yet: record a session first.');
         const parts = splitForDiscord(note);
         await interaction.editReply(parts[0]);
-        for (const p of parts.slice(1)) await interaction.followUp({ content: p, flags: MessageFlags.Ephemeral });
+        for (const p of parts.slice(1)) await interaction.followUp({ content: p, ...gmOnly(interaction) });
         return;
+      }
+      if (sub === 'book') {
+        await interaction.deferReply();
+        const pdf = await campaignBook(gid);
+        const name = `${CAMPAIGN_NAME.replace(/[^\w -]+/g, '').trim().replace(/\s+/g, '_') || 'Campaign'}_book.pdf`;
+        return interaction.editReply({ content: `📕 **${CAMPAIGN_NAME}: campaign book** (${Math.max(1, Math.round(pdf.length / 1024))} KB)`, files: [new AttachmentBuilder(pdf, { name })] });
+      }
+      if (sub === 'runs') {
+        if (!c.jobs.length) return interaction.reply({ content: 'No runs yet. Jobs are picked up from each session\'s recap.', flags: MessageFlags.Ephemeral });
+        const icon = { done: '✅', failed: '❌', 'in progress': '🏃', offered: '📨', 'turned down': '🚫' };
+        const list = c.jobs.map((j) => `${icon[j.status] || '•'} **${j.name}**${j.status ? ` · *${j.status}*` : ''}\n` +
+          `${j.johnson ? `  Hired by ${j.johnson}. ` : '  '}${j.task || ''}` +
+          `${j.payOffered || j.payReceived ? `\n  💰 ${j.payOffered ? `offered ${j.payOffered}` : ''}${j.payOffered && j.payReceived ? ', ' : ''}${j.payReceived ? `got ${j.payReceived}` : ''}` : ''}` +
+          `${j.complications ? `\n  ⚠️ ${j.complications}` : ''}${j.outcome ? `\n  🏁 ${j.outcome}` : ''}`).join('\n\n');
+        return reply(`🗂️ **Run history (${c.jobs.length})**\n\n${list}`);
       }
       if (sub === 'story') {
         const st = latestStory(gid);
@@ -837,6 +903,26 @@ client.on('interactionCreate', async (interaction) => {
   }
 });
 
+// ---------- alert if a recording goes quiet ----------
+// People are in the voice channel but nothing has been transcribed for 15 minutes: something's wrong
+// (the bot was disconnected, everyone's muted to it, the speech model stopped).
+setInterval(() => {
+  for (const [gid, rec] of live) {
+    const since = rec.lastLineAt || Date.parse(rec.meta.startedAt) || Date.now();
+    if (rec.silentAlerted || Date.now() - since < 15 * 60_000) continue;
+    const guild = client.guilds.cache.get(gid);
+    const vc = guild?.members.me?.voice?.channel;
+    const people = vc ? vc.members.filter((m) => !m.user.bot).size : 0;
+    if (!vc || people >= 2) rec.silentAlerted = true;   // once per session (breaks happen)
+    if (!vc) {
+      sendAlert(`silent:${gid}`, `🔇 **Note Tiger isn't in the voice channel any more** in ${guild?.name || 'your server'}, but the session "${rec.meta.title}" is still recording. Use \`/session stop\` and \`/session start\` to get it back.`);
+    } else if (people >= 2) {
+      sendAlert(`silent:${gid}`, `🔇 **Nothing has been transcribed for ${Math.round((Date.now() - since) / 60000)} minutes** in "${rec.meta.title}", though ${people} people are in ${vc.name}.` +
+        `\nIf you're on a break, ignore this. Otherwise check that the bot isn't muted for anyone, or restart it with \`/session stop\` and \`/session start\`.`);
+    }
+  }
+}, 60_000);
+
 // ---------- GM prep note before game night ----------
 // Every few minutes: if game night is within PREP_HOURS and the note wasn't sent for it yet, DM the GM(s).
 function nextGameNight(now = new Date()) {
@@ -859,12 +945,21 @@ async function prepCheck() {
     if (st.sentFor === stamp || live.has(guild.id) || !listSessions(guild.id).length) continue;
     writeJSON(file, { ...st, sentFor: stamp, sentAt: new Date().toISOString() });   // mark first: never send twice
     try {
+      const when = game.toLocaleString([], { weekday: 'long', hour: 'numeric', minute: '2-digit' });
+      // The GM channel if there is one; otherwise a DM to everyone with a GM role.
+      const gmChan = findChannel(guild, GM_CHANNEL);
+      if (gmChan) {
+        const note = await gmPrep(guild.id, askAI);
+        if (!note) continue;
+        for (const p of splitForDiscord(`${note}\n\n*Game night: ${when}. Get this any time with \`/campaign prep\`.*`)) await gmChan.send(p);
+        console.log(`[prep] posted in #${gmChan.name}`);
+        continue;
+      }
       const members = await guild.members.fetch();
       const gms = [...members.values()].filter((m) => !m.user.bot && isGM(m));
-      if (!gms.length) { console.log(`[prep] no one in ${guild.name} has a GM role, so no prep note was sent`); continue; }
+      if (!gms.length) { console.log(`[prep] no #${GM_CHANNEL} channel and no one with a GM role in ${guild.name}, so no prep note was sent`); continue; }
       const note = await gmPrep(guild.id, askAI);
       if (!note) continue;
-      const when = game.toLocaleString([], { weekday: 'long', hour: 'numeric', minute: '2-digit' });
       for (const gm of gms) {
         try {
           const parts = splitForDiscord(`${note}\n\n*Game night: ${when} · from ${guild.name}. Get this any time with \`/campaign prep\`.*`);

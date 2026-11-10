@@ -12,7 +12,7 @@ import {
 } from './config.js';
 import {
   knownGuilds, listSessions, readJSON, writeJSON, sessionLines, readLabels, transcriptEntries, speakerColors,
-  baseName, sessionStats, gidOf,
+  baseName, sessionStats, gidOf, sessionTimeline,
 } from './store.js';
 import { buildCampaign, latestStory, allQuotes } from './campaign.js';
 
@@ -66,6 +66,7 @@ export function sessionPayload(dir) {
     title: meta.title, date: meta.date, channel: meta.voiceChannel || null,
     recap: fs.existsSync(recapFile) ? fs.readFileSync(recapFile, 'utf8') : null,
     stats: sessionStats(dir),
+    timeline: sessionTimeline(dir),
     entries: entries.map((e) => ({
       t: e.t, k: e.kind === 'note' ? 'n' : 's', s: e.speaker, x: e.text,
       ...(e.offTopic ? { o: 1 } : {}), ...(e.recap ? { r: 1 } : {}),
@@ -99,12 +100,14 @@ export function manifestFor(st, dirs) {
       places: c.places.map((n) => ({ name: n.name, what: n.what, first: at(n.first), history: n.history.map((h) => ({ date: h.date, title: h.title, text: h.text })) })),
       runners: c.runners.map((r) => ({ name: r.name, player: r.player, color: r.color, status: r.status, gear: r.gear, first: at(r.first),
         sessions: r.sessions.map((x) => ({ title: x.title, date: x.date, did: x.did, moment: x.moment, talkPct: x.talkPct })) })),
+      jobs: c.jobs.map((j) => ({ name: j.name, johnson: j.johnson, task: j.task, payOffered: j.payOffered, payReceived: j.payReceived,
+        status: j.status, outcome: j.outcome, complications: j.complications, first: at(j.first), last: at(j.last) })),
       story: latestStory(gid),
       quotes: allQuotes(gid),
       open: c.open.map((t) => ({ n: t.n, text: t.text, opened: at(t.opened) })),
       closed: c.closed.map((t) => ({ text: t.text, how: t.how, opened: at(t.opened), closed: at(t.closed) })),
     };
-  }).filter((t) => t.contacts.length || t.places.length || t.runners.length || t.open.length || t.closed.length || t.story || t.quotes.length);
+  }).filter((t) => t.contacts.length || t.places.length || t.runners.length || t.jobs.length || t.open.length || t.closed.length || t.story || t.quotes.length);
   return { campaign: CAMPAIGN_NAME, updated: new Date().toISOString(), sessions, trackers };
 }
 

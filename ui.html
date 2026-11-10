@@ -85,6 +85,8 @@
   .runner ul { margin: 6px 0; padding-left: 18px; font-size: 14px; }
   .runner .gear { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
   .runner .gear span { font-size: 12px; background: var(--panel2); border: 1px solid var(--line); border-radius: 99px; padding: 0 8px; }
+  .vcard { margin: 8px 0; padding: 8px 12px; border-radius: 8px; background: var(--bg); border: 1px dashed var(--line); font-size: 14px; }
+  .vcard .vline { color: var(--accent2); font-style: italic; margin-top: 3px; }
   .quote { border-left: 3px solid var(--accent); padding: 4px 12px; margin: 10px 0; }
   .quote .by { color: var(--dim); font-size: 13px; }
   .npc { border-bottom: 1px solid var(--line); padding: 10px 0; }
@@ -141,6 +143,19 @@
   .tblock.note { background: #1a1e27; }
   .tag.tt { background: var(--bg); color: var(--dim); border: 1px solid var(--line); }
   .tview.hide-tt .tblock.tt { display: none; }
+  .timeline { border-left: 2px solid var(--line); margin-left: 56px; }
+  .tli { display: flex; gap: 14px; margin: 0 0 14px -58px; }
+  .tli .when { width: 56px; flex: none; text-align: right; font: 13px ui-monospace, Consolas, monospace; color: var(--dim); display: flex; flex-direction: column; }
+  .tli .when .hint { font: 11px system-ui; margin: 2px 0 0; }
+  .tli .what { flex: 1; min-width: 0; background: var(--panel2); border-radius: 8px; padding: 8px 12px; border-left: 3px solid var(--accent); }
+  .tli.sq .what { background: none; border-left-color: var(--line); padding: 2px 12px; }
+  .tli .what ul { margin: 6px 0; padding-left: 18px; font-size: 14px; color: var(--dim); }
+  .tview.fixing { user-select: none; }
+  .tview.fixing .tl[data-k] { cursor: pointer; border-radius: 4px; }
+  .tview.fixing .tl[data-k]:hover { background: rgba(255,255,255,.05); }
+  .tl.sel { background: rgba(255,170,40,.18) !important; outline: 1px solid rgba(255,170,40,.5); }
+  .fixbar { position: sticky; top: 0; z-index: 5; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; background: var(--panel); border: 1px solid var(--accent); border-radius: 10px; padding: 8px 10px; margin-bottom: 8px; }
+  .fixbar input { width: 170px; }
   .switch { display: flex; align-items: center; gap: 8px; font-weight: 400; margin: 0; cursor: pointer; }
   @media (max-width: 900px) { .sessions { grid-template-columns: minmax(0, 1fr); } .list { max-height: 220px; } nav { margin-left: 0; } header { flex-wrap: wrap; } }
 </style>
@@ -225,9 +240,13 @@
     </div>
     <div class="card">
       <div class="row" style="justify-content:space-between"><h2 style="margin:0">🏃 Runners <span class="hint" id="campRunCount"></span></h2>
-        <button class="btn ghost" id="campPrepBtn" type="button">🎲 GM prep note</button></div>
+        <div class="row" style="gap:8px"><button class="btn ghost" id="campBookBtn" type="button">📕 Campaign book (PDF)</button><button class="btn ghost" id="campPrepBtn" type="button">🎲 GM prep note</button></div></div>
       <div id="campPrep"></div>
       <div class="runners" id="campRunners"></div>
+    </div>
+    <div class="card">
+      <h2 style="margin-top:0">🗂️ Run history <span class="hint" id="campJobCount"></span></h2>
+      <div id="campJobs"></div>
     </div>
     <div class="camp">
       <div>
@@ -311,8 +330,10 @@
           <input type="text" id="RECAP_CHANNEL" placeholder="recaps"></div>
         <div><label for="LOG_CHANNEL">Transcript channel</label>
           <input type="text" id="LOG_CHANNEL" placeholder="logs"></div>
+        <div><label for="GM_CHANNEL">GM channel</label>
+          <input type="text" id="GM_CHANNEL" placeholder="gm"></div>
       </div>
-      <div class="hint">After each session the recap goes to <b>#recaps</b> and the full transcript to <b>#logs</b> (or whatever you name them here). Create the channels in Discord. If one doesn't exist, the bot posts in the channel where you typed <code>/session stop</code>.</div>
+      <div class="hint">After each session the recap goes to <b>#recaps</b> and the full transcript to <b>#logs</b> (or whatever you name them here). Create the channels in Discord. If one doesn't exist, the bot posts in the channel where you typed <code>/session stop</code>. GM prep notes and NPC voice-card updates go to <b>#gm</b>: make that channel private to your GM (and you).</div>
       <label for="GM_ROLE">Game master role</label>
       <input type="text" id="GM_ROLE" placeholder="Game Master, GM, Storyteller, DM">
       <div class="hint">Give your GM / storyteller one of these Discord roles. Their lines are marked in the transcript with who they're voicing: <b>Narrator</b>, an <b>NPC</b>, or themselves. Separate several names with commas.</div>
@@ -432,6 +453,15 @@
       </div>
       <div class="hint">Uses this computer's clock, and Note Tiger has to be running then. The GM needs to allow direct messages from server members.</div>
       <div class="row" style="margin-top:12px"><button class="btn ghost" type="button" onclick="showTab('campaign');setTimeout(() => $('#campPrepBtn').click(), 300)">Preview the prep note</button></div>
+    </div>
+
+    <div class="card">
+      <h2>🚨 Alerts</h2>
+      <p class="hint" style="margin-top:0">The bot sends you a Discord DM if it crashes, if nothing has been heard for 15 minutes while people are in the voice channel, or if a recap fails. It messages the bot's owner (you, in the Discord Developer Portal) unless you put someone else's user ID below.</p>
+      <label class="switch"><input type="checkbox" id="ALERTS_ENABLED"> Send me alerts on Discord</label>
+      <label for="ALERT_USER_ID">Send them to <span class="hint">(optional Discord user ID; right-click a name with Developer Mode on → Copy User ID)</span></label>
+      <input type="text" id="ALERT_USER_ID" placeholder="Leave empty: the bot's owner">
+      <div class="row" style="margin-top:12px"><button class="btn ghost" id="alertTest" type="button">Send a test message</button><span class="hint" id="alertHint"></span></div>
     </div>
 
     <div class="card">
@@ -666,6 +696,10 @@ function renderCampaign() {
       <summary><b>${esc(c.name)}</b>${c.who ? `<span class="hint" style="margin:0">${esc(c.who)}</span>` : ''}${c.attitude ? `<span class="att">${esc(c.attitude)}</span>` : ''}</summary>
       <div class="hint">First met: ${esc(c.first?.title || '?')} (${esc(c.first?.date || '?')})${c.last && c.last.id !== c.first?.id ? ` · last seen: ${esc(c.last.title)} (${esc(c.last.date)})` : ''}</div>
       ${c.history.length ? `<ul>${c.history.map((h) => `<li><i>${esc(h.date)}:</i> ${esc(h.text)}</li>`).join('')}</ul>` : ''}
+      ${c.card ? `<div class="vcard"><div class="hint" style="margin:0 0 4px">🎭 GM voice card (not on the player website)</div>
+        ${c.card.personality ? `<div><b>Personality:</b> ${esc(c.card.personality)}</div>` : ''}${c.card.speech ? `<div><b>How they talk:</b> ${esc(c.card.speech)}</div>` : ''}
+        ${c.card.wants ? `<div><b>Wants:</b> ${esc(c.card.wants)}</div>` : ''}${c.card.knows ? `<div><b>Knows about the team:</b> ${esc(c.card.knows)}</div>` : ''}
+        ${c.card.lines?.length ? c.card.lines.map((l) => `<div class="vline">“${esc(l)}”</div>`).join('') : ''}</div>` : ''}
       <div class="row" style="gap:6px;margin-top:6px"><button class="mini" data-act="npc-edit">Edit</button><button class="mini" data-act="npc-delete">Remove</button></div>
     </details>`).join('')
     : `<div class="empty">${camp.contacts.length ? 'Nobody matches that search.' : 'No contacts yet. They\'re picked up when a recap is written (or rewritten).'}</div>`;
@@ -678,6 +712,16 @@ function renderCampaign() {
       <details><summary class="hint" style="cursor:pointer">Session by session</summary><ul>${r.sessions.map((x) => `<li><i>${esc(x.date)}:</i> ${esc(x.did)}${x.talkPct != null ? ` <span class="hint">🔦 ${x.talkPct}%</span>` : ''}</li>`).join('')}</ul></details>
       ${r.gear.length ? `<div class="gear">${r.gear.slice(-14).map((g) => `<span>${esc(g)}</span>`).join('')}</div>` : ''}
     </div>`).join('') : '<div class="hint">No runner profiles yet. They\'re built from each recap (players set their runner name with <code>/character</code>).</div>';
+  const jicon = { done: '✅', failed: '❌', 'in progress': '🏃', offered: '📨', 'turned down': '🚫' };
+  $('#campJobCount').textContent = `(${camp.jobs.length})`;
+  $('#campJobs').innerHTML = camp.jobs.length ? camp.jobs.map((j) => `<details class="npc" data-jkey="${esc(j.key)}">
+      <summary><b>${jicon[j.status] || '•'} ${esc(j.name)}</b>${j.status ? `<span class="att">${esc(j.status)}</span>` : ''}${j.johnson ? `<span class="hint" style="margin:0">hired by ${esc(j.johnson)}</span>` : ''}</summary>
+      ${j.task ? `<div style="margin-top:6px">${esc(j.task)}</div>` : ''}
+      <ul>${j.payOffered ? `<li>💰 Offered: ${esc(j.payOffered)}</li>` : ''}${j.payReceived ? `<li>💵 Got: ${esc(j.payReceived)}</li>` : ''}
+        ${j.complications ? `<li>⚠️ ${esc(j.complications)}</li>` : ''}${j.outcome ? `<li>🏁 ${esc(j.outcome)}</li>` : ''}
+        <li class="hint">${esc(j.sessions.map((x) => x.title).join(', '))}</li></ul>
+      <div class="row" style="gap:6px"><button class="mini" data-act="job-edit">Edit</button><button class="mini" data-act="job-delete">Remove</button></div>
+    </details>`).join('') : '<div class="hint">No runs yet. Jobs are picked up from each recap.</div>';
   $('#campPlaceCount').textContent = `(${camp.places.length})`;
   $('#campPlaces').innerHTML = camp.places.length ? camp.places.map((c) => `<details class="npc" data-pkey="${esc(c.key)}">
       <summary><b>${esc(c.name)}</b>${c.what ? `<span class="hint" style="margin:0">${esc(c.what)}</span>` : ''}</summary>
@@ -707,6 +751,11 @@ function renderCampaign() {
 $('#campGuild').addEventListener('change', loadCampaign);
 $('#campNpcQ').addEventListener('input', () => camp && renderCampaign());
 $('#campQuoteQ').addEventListener('input', () => camp && renderCampaign());
+$('#campBookBtn').addEventListener('click', () => {
+  const gid = $('#campGuild').value; if (!gid) return;
+  location.href = `/api/campaign/${gid}/book`;
+  toast('Making the campaign book…');
+});
 $('#campPrepBtn').addEventListener('click', async (e) => {
   const gid = $('#campGuild').value; if (!gid) return;
   e.target.disabled = true; $('#campPrep').innerHTML = '<div class="answer">Writing the prep note… (the local AI can take a minute)</div>';
@@ -729,6 +778,14 @@ $('#tab-campaign').addEventListener('click', (e) => {
   const b = e.target.closest('button.mini'); if (!b) return;
   e.preventDefault();
   const act = b.dataset.act;
+  if (act.startsWith('job')) {
+    const key = b.closest('.npc').dataset.jkey, j = camp.jobs.find((x) => x.key === key);
+    if (act === 'job-delete') { if (confirm(`Remove "${j.name}" from the run history?`)) campEdit({ type: act, key }); return; }
+    const status = prompt('Status (offered, in progress, done, failed, turned down):', j.status || ''); if (status === null) return;
+    const payReceived = prompt('Pay the team actually got:', j.payReceived || ''); if (payReceived === null) return;
+    const outcome = prompt('How it ended:', j.outcome || ''); if (outcome === null) return;
+    return campEdit({ type: act, key, status, payReceived, outcome });
+  }
   if (act.startsWith('place')) {
     const key = b.closest('.npc').dataset.pkey, c = camp.places.find((x) => x.key === key);
     if (act === 'place-delete') { if (confirm(`Remove ${c.name} from the places?`)) campEdit({ type: act, key }); return; }
@@ -836,6 +893,12 @@ $('#updCheck').addEventListener('click', async (e) => {
   e.target.disabled = false;
 });
 $('#updInstall').addEventListener('click', installUpdate);
+$('#alertTest').addEventListener('click', async (e) => {
+  e.target.disabled = true; $('#alertHint').textContent = 'Sending…';
+  try { await api('/api/alert/test', { method: 'POST', body: {} }); $('#alertHint').textContent = 'Sent. Check your Discord DMs.'; }
+  catch (err) { $('#alertHint').textContent = err.message; }
+  e.target.disabled = false;
+});
 
 // ---------- activity log ----------
 let logOpen = false;
@@ -970,9 +1033,11 @@ async function openSession(id, view = 'recap') {
     <div class="hint">${esc(s.date)}${s.voiceChannel ? ` · ${esc(s.voiceChannel)}` : ''}${dur != null ? ` · ${Math.floor(dur / 60)}h ${dur % 60}m` : ''}${s.tableTalkLines ? ` · ${s.tableTalkLines} line${s.tableTalkLines === 1 ? '' : 's'} of table talk kept out of the recap` : ''}${s.recapLines ? ` · opening recap of last session (${s.recapLines} line${s.recapLines === 1 ? '' : 's'}) left out` : ''}</div>
     ${renderMeter(s.stats, s.colors)}
     <div id="progBox"></div>
+    <a href="#" class="banner ok" id="fixHint" hidden style="display:block;text-decoration:none;color:inherit">✏️ Fixed. <b>Click here to rewrite the recap with your fixes</b> (quick: it keeps the AI's other choices).</a>
     <div class="tabs2">
       <button class="btn ${view === 'recap' ? '' : 'ghost'}" data-v="recap">Recap</button>
       <button class="btn ${view === 'transcript' ? '' : 'ghost'}" data-v="transcript">Transcript</button>
+      ${s.timeline ? `<button class="btn ${view === 'timeline' ? '' : 'ghost'}" data-v="timeline">Timeline</button>` : ''}
       <span style="flex:1"></span>
       <button class="btn ghost" id="dlBtn" title="Color-coded page that opens in any browser">Download transcript</button>
       <button class="btn ghost" id="repostBtn" title="Post this session's recap and transcript to Discord again (marked as updated)">Repost to Discord</button>
@@ -981,7 +1046,16 @@ async function openSession(id, view = 'recap') {
     </div>
     <div id="sessBody">${view === 'recap'
       ? (s.recap ? `<div class="recap">${md(s.recap)}</div>` : '<div class="empty">No recap yet. Click "Write recap".</div>')
-      : renderTranscript(s)}</div>`;
+      : view === 'timeline' ? renderTimeline(s) : renderTranscript(s)}</div>`;
+  if (view === 'timeline') $('#sessBody').querySelectorAll('[data-jump]').forEach((b) => b.onclick = async () => {
+    jumpTo = Number(b.dataset.jump);
+    await openSession(id, 'transcript');
+  });
+  if (view === 'transcript' && jumpTo) {
+    const target = [...$('#tbox').querySelectorAll('.tl[data-k]')].find((el) => Number(el.dataset.k.split(':')[0]) >= jumpTo);
+    jumpTo = null;
+    if (target) { target.scrollIntoView({ block: 'center' }); target.classList.add('sel'); setTimeout(() => target.classList.remove('sel'), 2500); }
+  }
   const ttToggle = $('#ttToggle');
   if (ttToggle) ttToggle.onchange = () => { showTableTalk = ttToggle.checked; $('#tbox').classList.toggle('hide-tt', !showTableTalk); };
   $('#sessView').querySelectorAll('[data-v]').forEach((b) => b.addEventListener('click', () => openSession(id, b.dataset.v)));
@@ -994,6 +1068,15 @@ async function openSession(id, view = 'recap') {
     openSession(id); loadSessions();
   };
   watchProgress(`${gid}/${id}`); // also shows progress if a rewrite is already running
+  if (view === 'transcript') wireFixes(gid, id);
+  $('#fixHint').onclick = async (e) => {
+    e.preventDefault();
+    watchProgress(`${gid}/${id}`);
+    $('#fixHint').hidden = true;
+    try { await api(`/api/sessions/${gid}/${encodeURIComponent(id)}/recap`, { method: 'POST', body: { reclassify: false } }); toast('Recap rewritten with your fixes.'); }
+    catch (err) { toast(err.message); }
+    openSession(id); loadSessions();
+  };
   $('#repostBtn').onclick = async (e) => {
     if (!status?.online) { toast('Start the bot first: it has to be online in Discord to post.'); return; }
     if (!confirm(`Post "${s.title}" to Discord again with its current recap and transcript?`)) return;
@@ -1056,6 +1139,19 @@ function renderSpotlight(st, colors) {
 }
 
 let showTableTalk = true;
+let jumpTo = null;   // a time to scroll the transcript to (from the timeline)
+// Scene by scene, from the game tracker. Click a scene to read that part of the transcript.
+function renderTimeline(s) {
+  const clock = (t) => new Date(t).toTimeString().slice(0, 5);
+  const mins = (a, b) => Math.max(1, Math.round((b - a) / 60000));
+  return `<div class="timeline">${s.timeline.map((x) => x.kind === 'squirrel'
+    ? `<div class="tli sq"><div class="when">${clock(x.t0)}</div><div class="what">🐿️ <span class="hint">Off-topic for ${mins(x.t0, x.t1)} min</span></div></div>`
+    : `<div class="tli"><div class="when">${clock(x.t0)}<span class="hint">${mins(x.t0, x.t1)} min</span></div>
+        <div class="what"><b>${x.combat ? '⚔️ ' : ''}${esc(x.scene)}</b>
+        ${x.events.length ? `<ul>${x.events.map((e) => `<li>${esc(e)}</li>`).join('')}</ul>` : ''}
+        <button class="mini" data-jump="${x.t0}">Read this part →</button></div></div>`).join('')}</div>
+    <div class="hint" style="margin-top:10px">Built by the game tracker when the recap was written. If a scene looks wrong, fix the transcript and rewrite the recap.</div>`;
+}
 function voiceTag(e) {
   if (!e.gm || !e.voice || e.voice === 'GM') return '';
   return e.voice === 'Narrator' ? '<span class="tag voice narr">📖 Narrator</span>' : `<span class="tag voice">🎭 ${esc(e.voice)}</span>`;
@@ -1073,11 +1169,76 @@ function renderTranscript(s) {
   }
   const blocks = groups.map((g) => `<div class="tblock ${g.offTopic ? 'tt' : ''} ${g.recap ? 'rc' : ''} ${g.kind === 'note' ? 'note' : ''}" style="border-left-color:${g.color}">
       <div class="tname" style="color:${g.color}">${esc(g.name)}${g.offTopic ? '<span class="tag tt" style="margin-left:8px">table talk</span>' : g.recap ? '<span class="tag tt" style="margin-left:8px">recap of last session</span>' : ''}</div>
-      ${g.lines.map((e) => `<div class="tl"><span class="tm">${clock(e.t)}</span>${esc(e.text)}</div>`).join('')}</div>`).join('');
+      ${g.lines.map((e) => `<div class="tl"${e.key ? ` data-k="${esc(e.key)}"${e.gm ? ' data-gm="1"' : ''}` : ''}><span class="tm">${clock(e.t)}</span>${esc(e.text)}</div>`).join('')}</div>`).join('');
   const toggle = s.tableTalkLines
     ? `<label class="switch" style="margin-bottom:10px"><input type="checkbox" id="ttToggle" ${showTableTalk ? 'checked' : ''}> Show table talk (${s.tableTalkLines} line${s.tableTalkLines === 1 ? '' : 's'}, dimmed)</label>`
     : '';
-  return `${toggle}<div class="tview ${showTableTalk ? '' : 'hide-tt'}" id="tbox">${blocks}</div>`;
+  const voices = [...new Set(s.entries.filter((e) => e.voice && e.voice !== 'GM' && e.voice !== 'Narrator').map((e) => e.voice))].sort();
+  const fixer = `<div class="row" style="justify-content:space-between;margin-bottom:8px">
+      <label class="switch" style="margin:0"><input type="checkbox" id="fixToggle" ${fixMode ? 'checked' : ''}> ✏️ Fix mistakes <span class="hint">(click a line, Shift-click to select a stretch)</span></label>
+      ${s.manualFixes ? `<span class="hint">${s.manualFixes} line${s.manualFixes === 1 ? '' : 's'} fixed by hand</span>` : ''}</div>
+    <div class="fixbar" id="fixBar" hidden>
+      <b id="fixCount"></b>
+      <button class="btn ghost" type="button" data-fix="tt">🐿️ Table talk</button>
+      <button class="btn ghost" type="button" data-fix="game">🎲 Game</button>
+      <span class="hint">GM is voicing:</span>
+      <input type="text" id="fixVoice" list="fixVoices" placeholder="Narrator, an NPC…">
+      <datalist id="fixVoices"><option value="Narrator"><option value="GM (out of character)">${voices.map((v) => `<option value="${esc(v)}">`).join('')}</datalist>
+      <button class="btn ghost" type="button" data-fix="voice">Set</button>
+      <button class="btn ghost" type="button" data-fix="reset" title="Forget my fixes for these lines and use the AI's call again">Undo my fixes</button>
+      <button class="btn ghost" type="button" data-fix="none">✕</button>
+    </div>`;
+  return `${toggle}${fixer}<div class="tview ${showTableTalk ? '' : 'hide-tt'} ${fixMode ? 'fixing' : ''}" id="tbox">${blocks}</div>`;
+}
+
+// ---------- fixing the AI's mistakes by hand ----------
+let fixMode = false;
+function wireFixes(gid, id) {
+  const box = $('#tbox'), bar = $('#fixBar');
+  if (!box || !bar) return;
+  const sel = new Set();
+  let anchor = null;
+  const all = () => [...box.querySelectorAll('.tl[data-k]')];
+  const paint = () => {
+    all().forEach((el) => el.classList.toggle('sel', sel.has(el.dataset.k)));
+    bar.hidden = !sel.size;
+    $('#fixCount').textContent = `${sel.size} line${sel.size === 1 ? '' : 's'}`;
+  };
+  $('#fixToggle').onchange = (e) => { fixMode = e.target.checked; box.classList.toggle('fixing', fixMode); if (!fixMode) { sel.clear(); paint(); } };
+  box.addEventListener('click', (e) => {
+    if (!fixMode) return;
+    const el = e.target.closest('.tl[data-k]'); if (!el) return;
+    const lines = all().filter((x) => x.offsetParent !== null);   // visible ones (table talk may be hidden)
+    if (e.shiftKey && anchor) {
+      const a = lines.findIndex((x) => x.dataset.k === anchor), b = lines.indexOf(el);
+      if (a >= 0 && b >= 0) for (let i = Math.min(a, b); i <= Math.max(a, b); i++) sel.add(lines[i].dataset.k);
+    } else if (sel.has(el.dataset.k)) sel.delete(el.dataset.k);
+    else sel.add(el.dataset.k);
+    anchor = el.dataset.k;
+    paint();
+  });
+  bar.addEventListener('click', async (e) => {
+    const b = e.target.closest('[data-fix]'); if (!b) return;
+    const what = b.dataset.fix;
+    if (what === 'none') { sel.clear(); paint(); return; }
+    const body = { keys: [...sel] };
+    if (what === 'tt') body.offTopic = true;
+    else if (what === 'game') body.offTopic = false;
+    else if (what === 'reset') { body.offTopic = null; body.voice = null; }
+    else if (what === 'voice') {
+      const v = $('#fixVoice').value.trim(); if (!v) { toast('Type who the GM is voicing, e.g. Narrator or an NPC name.'); return; }
+      const gmKeys = all().filter((x) => sel.has(x.dataset.k) && x.dataset.gm).map((x) => x.dataset.k);
+      if (!gmKeys.length) { toast('Pick lines the GM said: only their lines have a voice.'); return; }
+      body.keys = gmKeys; body.voice = /^gm\b/i.test(v) ? 'GM' : v;
+    }
+    const scroll = box.scrollTop;
+    try {
+      await api(`/api/sessions/${gid}/${encodeURIComponent(id)}/fix`, { method: 'POST', body });
+      await openSession(id, 'transcript');
+      $('#tbox').scrollTop = scroll;
+      $('#fixHint').hidden = false;
+    } catch (err) { toast(err.message); }
+  });
 }
 
 // ---------- ask ----------
@@ -1124,6 +1285,7 @@ async function loadSettings() {
   for (const k of ['CAMPAIGN_NAME', 'CLAUDE_MODEL', 'OLLAMA_MODEL']) $('#' + k).value = s[k];
   $('#LOG_CHANNEL').value = s.LOG_CHANNEL || 'logs';
   $('#RECAP_CHANNEL').value = s.RECAP_CHANNEL || 'recaps';
+  $('#GM_CHANNEL').value = s.GM_CHANNEL || 'gm';
   $('#GM_ROLE').value = s.GM_ROLE || 'Game Master, GM, Storyteller, DM';
   $('#SEPARATE_TABLE_TALK').checked = s.SEPARATE_TABLE_TALK !== 'false';
   $('#SKIP_OPENING_RECAP').checked = s.SKIP_OPENING_RECAP !== 'false';
@@ -1144,6 +1306,8 @@ async function loadSettings() {
   $('#GAME_TIME').value = s.GAME_TIME || '19:00';
   $('#PREP_HOURS').value = s.PREP_HOURS || 3;
   $('#UPDATE_CHECK').checked = s.UPDATE_CHECK !== 'false';
+  $('#ALERTS_ENABLED').checked = s.ALERTS_ENABLED !== 'false';
+  $('#ALERT_USER_ID').value = s.ALERT_USER_ID || '';
   showUpdateStatus();
   const url = status?.site?.url;
   $('#siteHint').innerHTML = url && status.site.configured ? `Site: <a href="${esc(url)}" target="_blank" style="color:var(--accent2)">${esc(url)}</a>` : '';
@@ -1177,8 +1341,11 @@ $('#saveBtn').addEventListener('click', async () => {
     GAME_TIME: $('#GAME_TIME').value || '19:00',
     PREP_HOURS: String(Math.max(1, Math.min(72, Number($('#PREP_HOURS').value) || 3))),
     UPDATE_CHECK: $('#UPDATE_CHECK').checked ? 'true' : 'false',
+    ALERTS_ENABLED: $('#ALERTS_ENABLED').checked ? 'true' : 'false',
+    ALERT_USER_ID: $('#ALERT_USER_ID').value.trim(),
     LOG_CHANNEL: $('#LOG_CHANNEL').value.replace(/^#/, '').trim() || 'logs',
     RECAP_CHANNEL: $('#RECAP_CHANNEL').value.replace(/^#/, '').trim() || 'recaps',
+    GM_CHANNEL: $('#GM_CHANNEL').value.replace(/^#/, '').trim() || 'gm',
     GM_ROLE: $('#GM_ROLE').value.trim() || 'Game Master, GM, Storyteller, DM',
     ANTHROPIC_API_KEY: ai === 'claude' ? $('#ANTHROPIC_API_KEY').value : '',
   };

@@ -7,7 +7,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { CAMPAIGN_NAME, USE_CLAUDE } from './config.js';
-import { listSessions, readJSON, writeJSON, guildDir, gidOf, getSettings, sessionLines, baseName, sessionStats, speakerColors } from './store.js';
+import { listSessions, readJSON, writeJSON, guildDir, gidOf, getSettings, sessionLines, baseName, sessionStats, speakerColors, readLabels, lineKey } from './store.js';
 import { setCampaignNames, knownNames } from './spelling.js';
 
 const editsFile = (gid) => path.join(guildDir(gid), 'campaign-edits.json');
@@ -41,6 +41,8 @@ export function buildCampaign(gid, { upTo = null } = {}) {
   const npcs = new Map();      // key -> contact
   const places = new Map();    // key -> place
   const runners = new Map();   // key -> runner profile
+  const jobs = new Map();      // key -> job
+  const removedJobs = new Set();
   const removedPlaces = new Set();
   const threads = new Map();   // id -> thread
   const removedNpcs = new Set();
@@ -59,6 +61,15 @@ export function buildCampaign(gid, { upTo = null } = {}) {
         if (n.attitude) c.attitude = n.attitude;
         c.last = at;
         if (n.happened) c.history.push({ ...at, text: n.happened });
+        npcs.set(key, c);
+      }
+      for (const [name, card] of Object.entries(readJSON(path.join(ev.s.dir, 'voices.json'), {}))) {
+        const key = npcKey(name);
+        if (!key || removedNpcs.has(key)) continue;
+        const c = npcs.get(key) || { key, name, who: '', attitude: '', first: at, history: [] };
+        const lines = [...(c.card?.lines || []), ...(card.lines || [])];
+        c.card = { ...(c.card || {}), ...Object.fromEntries(Object.entries(card).filter(([, v]) => v)), lines: [...new Set(lines)].slice(-6), at };
+        c.last = c.last || at;
         npcs.set(key, c);
       }
       for (const p of ev.found.places || []) {
@@ -80,6 +91,15 @@ export function buildCampaign(gid, { upTo = null } = {}) {
         c.status = r.status || '';
         runners.set(key, c);
       }
+      for (const j of ev.found.jobs || []) {
+        const key = npcKey(j.name);
+        if (!key || removedJobs.has(key)) continue;
+        const c = jobs.get(key) || { key, name: j.name, first: at, sessions: [] };
+        for (const f of ['johnson', 'task', 'payOffered', 'payReceived', 'status', 'outcome', 'complications']) if (j[f]) c[f] = j[f];
+        if (!c.sessions.some((x) => x.id === at.id)) c.sessions.push(at);
+        c.last = at;
+        jobs.set(key, c);
+      }
       for (const th of ev.found.threads || []) {
         if (removedThreads.has(th.id)) continue;
         threads.set(th.id, { id: th.id, text: th.text, opened: at, status: 'open' });
@@ -100,6 +120,10 @@ export function buildCampaign(gid, { upTo = null } = {}) {
       else if (e.type === 'npc-edit' && npcs.has(e.key)) {
         const c = npcs.get(e.key);
         for (const f of ['who', 'attitude']) if (typeof e[f] === 'string') c[f] = e[f];
+      } else if (e.type === 'job-delete') { jobs.delete(e.key); removedJobs.add(e.key); }
+      else if (e.type === 'job-edit' && jobs.has(e.key)) {
+        const c = jobs.get(e.key);
+        for (const f of ['status', 'payReceived', 'outcome']) if (typeof e[f] === 'string') c[f] = e[f];
       } else if (e.type === 'place-delete') { places.delete(e.key); removedPlaces.add(e.key); }
       else if (e.type === 'place-edit' && places.has(e.key)) { if (typeof e.what === 'string') places.get(e.key).what = e.what; }
       else if (e.type === 'place-add') {
@@ -125,7 +149,8 @@ export function buildCampaign(gid, { upTo = null } = {}) {
     const player = roster.get(r.name) || null;
     return { ...r, player, color: (player && colors[player]) || null, gear: r.gear.slice(-30) };
   }).sort((a, b) => b.sessions.length - a.sessions.length || a.name.localeCompare(b.name));
-  return { contacts, places: [...places.values()].sort((a, b) => a.name.localeCompare(b.name)), runners: runnerList, open, closed };
+  return { contacts, places: [...places.values()].sort((a, b) => a.name.localeCompare(b.name)), runners: runnerList,
+    jobs: [...jobs.values()].reverse(), open, closed };
 }
 
 // Contact and place names feed the spelling fixer.
@@ -147,6 +172,7 @@ Reply with JSON only, exactly this shape:
 {"npcs":[{"name":"...","who":"...","attitude":"...","happened":"..."}],
  "places":[{"name":"...","what":"...","happened":"..."}],
  "runners":[{"name":"...","did":"...","moment":"...","gear":["..."],"status":"..."}],
+ "jobs":[{"name":"...","johnson":"...","task":"...","payOffered":"...","payReceived":"...","status":"...","outcome":"...","complications":"..."}],
  "newLooseEnds":["..."],
  "resolved":[{"id":"T3","how":"..."}]}
 
@@ -164,6 +190,12 @@ runners: one entry per PLAYER CHARACTER (from the RUNNERS list only) who did som
   moment: their standout moment (a clutch roll, a great line, a disaster), or empty.
   gear: new gear, cyberware, spells, vehicles or drones they got or used notably (short names), or [].
   status: injuries, debts, heat or conditions they're left with, or empty.
+jobs: every job (run) the team was offered, took, or worked on THIS session. If it continues a KNOWN JOB, use that
+  name exactly.
+  name: a short name for the job ("Renraku crate run"). johnson: who hired them (Mr. Johnson, fixer). task: what the
+  job is. payOffered / payReceived: amounts as said ("3,000¥ each"), or empty. status: one of offered, in progress,
+  done, failed, turned down. outcome: how it ended, or empty if not over. complications: surprises or what went
+  wrong, or empty.
 newLooseEnds: new open questions, leads, debts, promises and threats from THIS session that the team may follow up
   on. One short sentence each. Don't repeat ones already in the open list.
 resolved: open loose ends (by their id) that this session clearly settled, with a few words on how.
@@ -210,13 +242,14 @@ export async function updateCampaign(dir, recap, askAI) {
   const gid = gidOf(dir);
   const before = buildCampaign(gid, { upTo: dir });
   const known = before.contacts.map((c) => `- ${c.name}${c.who ? `: ${c.who}` : ''}`).join('\n') || '(none yet)';
+  const knownJobs = before.jobs.map((j) => `- ${j.name} (${j.status || '?'})`).join('\n') || '(none yet)';
   const knownPlaces = before.places.map((c) => `- ${c.name}${c.what ? `: ${c.what}` : ''}`).join('\n') || '(none yet)';
   const ids = new Map(before.open.map((t) => [`T${t.n}`, t.id]));
   const open = before.open.map((t) => `[T${t.n}] ${t.text}`).join('\n') || '(none)';
   const budget = USE_CLAUDE ? 60_000 : 9_000;
   const roster = runnerRoster(gid);
   const runnersList = [...roster].map(([r, p]) => `- ${r}${p ? ` (played by ${p})` : ''}`).join('\n') || '(unknown)';
-  const user = `RUNNERS (the player characters):\n${runnersList}\n\nKNOWN CONTACTS:\n${known.slice(0, budget / 4)}\n\nKNOWN PLACES:\n${knownPlaces.slice(0, budget / 5)}\n\nOPEN LOOSE ENDS:\n${open.slice(0, budget / 3)}\n\n` +
+  const user = `RUNNERS (the player characters):\n${runnersList}\n\nKNOWN CONTACTS:\n${known.slice(0, budget / 4)}\n\nKNOWN PLACES:\n${knownPlaces.slice(0, budget / 5)}\n\nKNOWN JOBS:\n${knownJobs.slice(0, budget / 8)}\n\nOPEN LOOSE ENDS:\n${open.slice(0, budget / 3)}\n\n` +
     `THIS SESSION'S RECAP:\n${String(recap).slice(0, budget)}`;
   const raw = await askAI(CAMPAIGN_SYSTEM, user, 3500, { json: true });
   const data = parseJSON(raw);
@@ -247,6 +280,12 @@ export async function updateCampaign(dir, recap, askAI) {
       }
       return out;
     })(),
+    jobs: (Array.isArray(data.jobs) ? data.jobs : []).map((j) => ({
+      name: clean(j?.name, 80), johnson: clean(j?.johnson, 80), task: clean(j?.task, 300),
+      payOffered: clean(j?.payOffered, 80), payReceived: clean(j?.payReceived, 80),
+      status: /fail/i.test(j?.status) ? 'failed' : /done|complete|finish|success/i.test(j?.status) ? 'done' : /turn|declin|refus/i.test(j?.status) ? 'turned down' : /progress|accept|took|ongoing|active/i.test(j?.status) ? 'in progress' : /offer/i.test(j?.status) ? 'offered' : '',
+      outcome: clean(j?.outcome, 300), complications: clean(j?.complications, 300),
+    })).filter((j) => j.name && (j.task || j.johnson)).slice(0, 6),
     threads: (Array.isArray(data.newLooseEnds) ? data.newLooseEnds : [])
       .map((t) => clean(typeof t === 'string' ? t : t?.text, 250)).filter(Boolean).slice(0, 15)
       .map((text, i) => ({ id: `${sid}#${i + 1}`, text })),
@@ -407,7 +446,8 @@ export async function gmPrep(gid, askAI) {
     story ? `STORY SO FAR:\n${story.text}` : '',
     last ? `LAST SESSION (${last.title}, ${last.date}) RECAP:\n${lastRecap.slice(0, USE_CLAUDE ? 30_000 : 5_000)}` : '',
     c.open.length ? `OPEN LOOSE ENDS:\n${c.open.map((t) => `- ${t.text} (since ${t.opened?.title || '?'})`).join('\n')}` : '',
-    contacts.length ? `CONTACTS:\n${contacts.map((x) => `- ${x.name}${x.who ? `: ${x.who}` : ''}${x.attitude ? ` [${x.attitude}]` : ''} (last seen ${x.last?.title || '?'})`).join('\n')}` : '',
+    contacts.length ? `CONTACTS:\n${contacts.map((x) => `- ${x.name}${x.who ? `: ${x.who}` : ''}${x.attitude ? ` [${x.attitude}]` : ''} (last seen ${x.last?.title || '?'})` +
+      `${x.card?.personality ? `; plays as: ${x.card.personality}` : ''}${x.card?.wants ? `; wants: ${x.card.wants}` : ''}`).join('\n')}` : '',
     c.runners.length ? `RUNNERS:\n${c.runners.map((r) => `- ${r.name}${r.player ? ` (${r.player})` : ''}${r.status ? `: ${r.status}` : ''}${r.gear.length ? `; gear: ${r.gear.slice(-6).join(', ')}` : ''}`).join('\n')}` : '',
   ].filter(Boolean).join('\n\n');
   if (!notes) return null;
@@ -424,4 +464,53 @@ export async function gmPrep(gid, askAI) {
   if (c.open.length) parts.push(`**🧵 Open loose ends**\n${c.open.map((t) => `${t.n}. ${t.text}`).join('\n')}`);
   if (contacts.length) parts.push(`**🕵️ Recent contacts**\n${contacts.slice(0, 10).map((x) => `• ${x.name}${x.attitude ? ` — ${x.attitude}` : ''}`).join('\n')}`);
   return parts.join('\n\n');
+}
+
+// ---------- NPC voice cards (for the GM) ----------
+// How the GM has played each NPC: personality, how they talk, what they want, what they know about the team,
+// and a few memorable lines. Built from the lines the GM spoke as that NPC. Never published to the player website.
+const VOICE_SYSTEM = `You help the game master of ${CAMPAIGN_NAME}, a Shadowrun tabletop RPG, play a recurring NPC consistently.
+You get the NPC's existing card (may be empty) and the lines the GM spoke AS this NPC in the latest session
+(messy speech-to-text). Update the card. Keep what's still true, add what's new, never invent.
+Reply with JSON only:
+{"personality": "a few words to one sentence",
+ "speech": "how they talk: tone, verbal tics, accent or slang, if any",
+ "wants": "what they seem to want, or empty",
+ "knows": "what they know about the runners, or empty",
+ "lines": ["up to 3 short memorable lines they said, cleaned up a little"]}`;
+
+export async function updateVoiceCards(dir, askAI) {
+  const gid = gidOf(dir);
+  const { voices } = readLabels(dir);
+  const byNpc = new Map();
+  for (const l of sessionLines(dir)) {
+    const v = voices.get(lineKey(l));
+    if (!v || v === 'GM' || v === 'Narrator' || !l.gm) continue;
+    if (!byNpc.has(v)) byNpc.set(v, []);
+    byNpc.get(v).push(String(l.text));
+  }
+  const before = buildCampaign(gid, { upTo: dir });
+  const cards = {};
+  for (const [npc, said] of byNpc) {
+    if (said.length < 3) continue;   // a line or two isn't enough to learn anything
+    const known = before.contacts.find((c) => c.key === npcKey(npc));
+    const prev = known?.card ? JSON.stringify(known.card) : '(new NPC, no card yet)';
+    let text = said.join('\n');
+    if (text.length > (USE_CLAUDE ? 20_000 : 4_000)) text = text.slice(0, USE_CLAUDE ? 20_000 : 4_000);
+    try {
+      const raw = await askAI(VOICE_SYSTEM, `NPC: ${npc}${known?.who ? ` (${known.who})` : ''}\nEXISTING CARD: ${prev}\n\nLINES THE GM SPOKE AS ${npc}:\n${text}`, 500, { json: true });
+      const j = parseJSON(raw);
+      if (!j) continue;
+      cards[npc] = {
+        personality: clean(j.personality, 200), speech: clean(j.speech, 200), wants: clean(j.wants, 200), knows: clean(j.knows, 250),
+        lines: (Array.isArray(j.lines) ? j.lines : []).map((x) => clean(x, 160)).filter(Boolean).slice(0, 3),
+        heard: said.length,
+      };
+    } catch (err) {
+      console.error(`[voice cards] ${npc}: ${err.message}`);
+    }
+  }
+  writeJSON(path.join(dir, 'voices.json'), cards);
+  console.log(`[voice cards] ${Object.keys(cards).length} NPC card(s) updated`);
+  return cards;
 }

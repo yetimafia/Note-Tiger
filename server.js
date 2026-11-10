@@ -6,12 +6,14 @@ import { fork, exec } from 'node:child_process';
 import {
   APP_DIR, DISCORD_TOKEN, PANEL_PORT, AUTO_START, USE_CLAUDE, OLLAMA_MODEL, CAMPAIGN_NAME, WHISPER_MODEL,
 } from './config.js';
-import { listSessions, readSession, sessionDir, knownGuilds, transcriptHtml } from './store.js';
+import { listSessions, readSession, sessionDir, knownGuilds, transcriptHtml, fixLines, writeTranscriptFiles } from './store.js';
 import { buildCampaign, addEdit, latestStory, allQuotes } from './campaign.js';
 import { backupNow, restoreBackup, backupStatus, backupConfigured, startBackupSchedule } from './backup.js';
 import { readVocab, saveVocab, fixText } from './spelling.js';
 import { updateStatus, checkForUpdate, installUpdate, startUpdateChecks, CURRENT_VERSION } from './updater.js';
 import { gmPrep } from './campaign.js';
+import { sendAlert, testAlert } from './alerts.js';
+import { campaignBook } from './book.js';
 import { recapSession, askArchive, ollamaStatus, refreshOllama, AI_LABEL, getProgress, askAI } from './ai.js';
 import { startWeb } from './web.js';
 import { publishSite, siteStatus, siteConfigured } from './site.js';
@@ -85,6 +87,10 @@ function startBot() {
       }
       crash = { code: code ?? signal, hint, at: Date.now() };
       console.error(`The bot stopped unexpectedly (exit code ${code ?? signal}).`);
+      const wasRecording = (botStatus?.guilds || []).some((g) => g.recording);
+      const tail = LOG_LINES.filter((l) => l.source === 'bot').slice(-8).map((l) => l.text).join('\n').slice(-900);
+      sendAlert('crash', `${wasRecording ? '⚠️ **The bot crashed during a recording.** What was said before the crash is saved; anything after isn\'t being recorded.' : '⚠️ **The bot crashed.**'}` +
+        `\n${hint ? `${hint}\n` : ''}Open Note Tiger to start it again.${tail ? `\n\`\`\`\n${tail.replace(/`/g, "'")}\n\`\`\`` : ''}`);
     }
     botStatus = botStatus ? { ...botStatus, online: false, guilds: botStatus.guilds?.map((g) => ({ ...g, recording: null })) } : null;
   });
@@ -179,13 +185,24 @@ startWeb({
     const { dir, ...s } = readSession(gid, id);
     return s;
   },
-  async regenerateRecap(gid, id) {
+  async regenerateRecap(gid, id, { reclassify = true } = {}) {
     const dir = sessionDir(gid, id);
     if (liveSessionId(gid) === id) throw new Error('That session is still recording.');
-    // Rewriting also re-checks which parts were table talk.
-    const recap = await recapSession(dir, { reclassify: true });
+    // A normal rewrite also re-checks which parts were table talk; after hand fixes it can skip that (much faster).
+    const recap = await recapSession(dir, { reclassify });
     if (siteConfigured()) publishSite({ dirs: [dir] }).catch((e) => console.error('[website]', e.message));
     return recap;
+  },
+  // Hand fixes from the transcript view: table talk / game, and who the GM was voicing.
+  fixLines(gid, id, { keys, offTopic, voice }) {
+    const dir = sessionDir(safeGid(gid), id);
+    if (!Array.isArray(keys) || !keys.length || keys.length > 5000) throw new Error('Select some lines first.');
+    fixLines(dir, keys.map(String), {
+      offTopic: offTopic === null || typeof offTopic === 'boolean' ? offTopic : undefined,
+      voice: voice === null || typeof voice === 'string' ? voice : undefined,
+    });
+    writeTranscriptFiles(dir, safeGid(gid));
+    return { ok: true };
   },
   deleteSession(gid, id) {
     const dir = sessionDir(gid, id);
@@ -202,11 +219,17 @@ startWeb({
     return { ...c, story: latestStory(gid), quotes: allQuotes(gid) };
   },
   backupNow() { return backupNow('manual'); },
+  async testAlert() {
+    const ok = await testAlert();
+    if (!ok) throw new Error('Couldn\'t send the test message. Check that the Discord token is set and that you share a server with the bot. See the activity log for details.');
+    return { ok: true };
+  },
   checkUpdate() { return checkForUpdate(); },
   installUpdate() {
     if ((botStatus?.guilds || []).some((g) => g.recording)) throw new Error('A session is recording. Update after you stop it.');
     return installUpdate(async () => { await stopBot(); });
   },
+  campaignBook(gid) { return campaignBook(safeGid(gid)); },
   async gmPrep(gid) { return { note: await gmPrep(safeGid(gid), askAI) }; },
   async restoreBackup() {
     if ((botStatus?.guilds || []).some((g) => g.recording)) throw new Error('Stop the recording before restoring.');
@@ -220,6 +243,7 @@ startWeb({
       'thread-add': ['text'], 'thread-close': ['id', 'how'], 'thread-reopen': ['id'], 'thread-delete': ['id'],
       'thread-edit': ['id', 'text'], 'npc-add': ['name', 'who', 'attitude'], 'npc-edit': ['key', 'who', 'attitude'], 'npc-delete': ['key'],
       'place-add': ['name', 'what'], 'place-edit': ['key', 'what'], 'place-delete': ['key'],
+      'job-edit': ['key', 'status', 'payReceived', 'outcome'], 'job-delete': ['key'],
     }[edit?.type];
     if (!allowed) throw new Error('Unknown change.');
     const clean = { type: edit.type, by: 'Note Tiger' };

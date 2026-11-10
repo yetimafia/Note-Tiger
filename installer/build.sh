@@ -23,8 +23,9 @@ fi
 cp "$BUILD/node-$NODE_VERSION.exe" "$STAGE/runtime/node.exe"
 
 echo "==> App files"
-cp server.js index.js config.js store.js ai.js site.js library.js campaign.js spelling.js backup.js updater.js squirrel.js web.js ui.html tiger.png package.json package-lock.json test-speech.js setup-local-ai.bat .env.example "$STAGE/app/"
+cp server.js index.js config.js store.js ai.js site.js library.js campaign.js spelling.js backup.js updater.js squirrel.js alerts.js book.js web.js ui.html tiger.png package.json package-lock.json test-speech.js setup-local-ai.bat .env.example "$STAGE/app/"
 cp -r site "$STAGE/app/site"
+cp -r fonts "$STAGE/app/fonts"
 
 echo "==> Windows packages"
 (cd "$STAGE/app" && npm ci --os=win32 --cpu=x64 --ignore-scripts --omit=dev --no-audit --no-fund --loglevel=error)

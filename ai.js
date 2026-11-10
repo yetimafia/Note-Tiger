@@ -10,7 +10,7 @@ import {
   listSessions, readJSON, formatTranscript, sessionLines, readLabels, updateLabels, lineKey, writeTranscriptFiles,
   previousRecap, gidOf,
 } from './store.js';
-import { updateCampaign, updateStory, rulesSection } from './campaign.js';
+import { updateCampaign, updateStory, rulesSection, updateVoiceCards } from './campaign.js';
 import { knownNames } from './spelling.js';
 import { findTableTalk, gameLogText } from './squirrel.js';
 
@@ -341,7 +341,8 @@ async function recapSessionInner(dir, { prevRecap = previousRecap(dir), reclassi
   const lines = sessionLines(dir);
   const notes = readJSON(path.join(dir, 'notes.json'), []);
   if (lines.length === 0 && notes.length === 0) throw new Error('That session has no transcript.');
-  const { offTopic, voices } = await tagLines(dir, { force: reclassify });
+  await tagLines(dir, { force: reclassify });
+  const { offTopic, voices } = readLabels(dir);   // includes fixes made by hand
   const recap = await detectOpeningRecap(dir, { prevRecap, force: reclassify });
   const labels = { offTopic, voices, recap };
   writeTranscriptFiles(dir);
@@ -360,7 +361,13 @@ async function recapSessionInner(dir, { prevRecap = previousRecap(dir), reclassi
     console.error('[campaign] skipped:', err.message);
   }
   try {
-    setProgress(dir, 99, 100, 0.5, 'Updating the story so far');
+    setProgress(dir, 99, 100, 0.3, 'Updating the GM\'s NPC voice cards');
+    await updateVoiceCards(dir, askAI);
+  } catch (err) {
+    console.error('[voice cards] skipped:', err.message);
+  }
+  try {
+    setProgress(dir, 99, 100, 0.6, 'Updating the story so far');
     await updateStory(dir, text, askAI);
   } catch (err) {
     console.error('[story] skipped:', err.message);

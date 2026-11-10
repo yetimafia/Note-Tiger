@@ -19,6 +19,7 @@ export const SETTINGS = [
   { key: 'SEPARATE_TABLE_TALK' },
   { key: 'LOG_CHANNEL' },
   { key: 'RECAP_CHANNEL' },
+  { key: 'GM_CHANNEL' },
   { key: 'GM_ROLE' },
   { key: 'SKIP_OPENING_RECAP' },
   { key: 'SITE_ENABLED' },
@@ -35,6 +36,8 @@ export const SETTINGS = [
   { key: 'GAME_TIME' },
   { key: 'PREP_HOURS' },
   { key: 'UPDATE_CHECK' },
+  { key: 'ALERTS_ENABLED' },
+  { key: 'ALERT_USER_ID' },
 ];
 
 function readEnvLines() {
@@ -202,7 +205,11 @@ export function startWeb(ctx, port) {
         const [guild, id, action] = [parts[2], decodeURIComponent(parts[3]), parts[4]];
         if (!action && req.method === 'GET') return send(res, 200, ctx.readSession(guild, id));
         if (!action && req.method === 'DELETE') { ctx.deleteSession(guild, id); return send(res, 200, { ok: true }); }
-        if (action === 'recap' && req.method === 'POST') return send(res, 200, { recap: await ctx.regenerateRecap(guild, id) });
+        if (action === 'recap' && req.method === 'POST') {
+          const body = await readBody(req);
+          return send(res, 200, { recap: await ctx.regenerateRecap(guild, id, { reclassify: body.reclassify !== false }) });
+        }
+        if (action === 'fix' && req.method === 'POST') return send(res, 200, ctx.fixLines(guild, id, await readBody(req)));
         if (action === 'repost' && req.method === 'POST') return send(res, 200, await ctx.repostSession(guild, id));
         if (action === 'transcript' && req.method === 'GET') {
           const s = ctx.readSession(guild, id);
@@ -215,9 +222,16 @@ export function startWeb(ctx, port) {
         }
       }
 
+      if (parts[1] === 'alert' && parts[2] === 'test' && req.method === 'POST') return send(res, 200, await ctx.testAlert());
       // Updates
       if (parts[1] === 'update' && parts[2] === 'check' && req.method === 'POST') return send(res, 200, await ctx.checkUpdate());
       if (parts[1] === 'update' && parts[2] === 'install' && req.method === 'POST') return send(res, 200, await ctx.installUpdate());
+      // Campaign book (PDF download)
+      if (parts[1] === 'campaign' && parts[2] && parts[3] === 'book' && req.method === 'GET') {
+        const pdf = await ctx.campaignBook(parts[2]);
+        res.writeHead(200, { 'Content-Type': 'application/pdf', 'Content-Disposition': 'attachment; filename="campaign-book.pdf"', 'Content-Length': pdf.length });
+        return res.end(pdf);
+      }
       // GM prep note
       if (parts[1] === 'campaign' && parts[2] && parts[3] === 'prep' && req.method === 'POST') return send(res, 200, await ctx.gmPrep(parts[2]));
       // Backups
