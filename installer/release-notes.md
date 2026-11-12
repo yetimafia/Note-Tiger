@@ -1,7 +1,5 @@
-**New in 2.8.1**
-- 🎭 **Much better NPC voices with the local AI.** A new pass reads the conversation in order, remembering who's in the scene, who introduced themselves ("my name is Grim"), and who the players are talking to ("What do you got for us, Mr. Graham?"). On a real session it went from finding no NPCs at all to finding Grim, Wendy and Max. Sound-alike spellings (Grim / Grimm / Graham) are merged into one NPC.
-- ⚡ **Faster recaps:** the old line-by-line tagging pass is gone (the new passes do its job better).
-- The NPC voice cards now have real lines to learn from.
+**New in 2.8.2**
+- 📚 **Books per server.** Running more than one game on the same bot? In Library → **Books per server**, pick which rulebooks each Discord server searches and what game it plays. A D&D server won't get Shadowrun answers anymore. Servers you haven't set up still search every book.
+- ❓ **`/help`** lists every command and what it does (only you see it, unless you pick `public`).
 
-To update an old session: Sessions → pick the session → **Rewrite recap**. Anything you fixed by hand stays fixed.
 Your settings, sessions and rulebooks are kept when you update.

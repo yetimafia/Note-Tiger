@@ -37,7 +37,7 @@ import {
 } from './store.js';
 import { askAI, recapSession, buildArchive, ASK_SYSTEM, AI_LABEL, getProgress } from './ai.js';
 import { publishSite, siteConfigured, siteUrl } from './site.js';
-import { askBooks, listBooks, renderPage, pageInfo } from './library.js';
+import { askBooks, booksFor, serverSetup, renderPage, pageInfo } from './library.js';
 import { buildCampaign, addEdit, campaignSummary, logRulesCall, npcKey, latestStory, allQuotes, gmPrep } from './campaign.js';
 import { knownNames } from './spelling.js';
 import { campaignBook } from './book.js';
@@ -560,7 +560,39 @@ const commands = [
       .addStringOption((o) => o.setName('text').setDescription('e.g. "We still owe Sticks 5,000¥"').setRequired(true))),
   new SlashCommandBuilder().setName('ask').setDescription('Ask about past sessions')
     .addStringOption((o) => o.setName('question').setDescription('e.g. "What did Mr. Johnson offer us for the Ares job?"').setRequired(true)),
+  new SlashCommandBuilder().setName('help').setDescription('List all my commands and what they do')
+    .addBooleanOption((o) => o.setName('public').setDescription('Post it for everyone instead of just you')),
 ].map((c) => c.toJSON());
+
+// /help text, built from the command list itself so it never goes out of date.
+const HELP_GROUPS = [
+  ['🎙️ Recording', ['session', 'note', 'character', 'optout']],
+  ['📼 Recaps', ['recap', 'repost', 'ask']],
+  ['📚 Rulebooks', ['game']],
+  ['🕵️ Campaign', ['campaign']],
+  ['❓ Help', ['help']],
+];
+function helpText() {
+  const byName = new Map(commands.map((c) => [c.name, c]));
+  const line = (name, d) => `\`/${name}\` – ${d}`;
+  const out = ['🐯 **Note Tiger commands**'];
+  const used = new Set();
+  const groups = [...HELP_GROUPS, ['More', commands.map((c) => c.name)]];
+  for (const [title, names] of groups) {
+    const rows = [];
+    for (const n of names) {
+      const c = byName.get(n);
+      if (!c || used.has(n)) continue;
+      used.add(n);
+      const subs = (c.options || []).filter((o) => o.type === 1); // 1 = subcommand
+      if (subs.length) for (const sc of subs) rows.push(line(`${c.name} ${sc.name}`, sc.description));
+      else rows.push(line(c.name, c.description));
+    }
+    if (rows.length) out.push(`\n**${title}**`, ...rows);
+  }
+  out.push('\n*Rulebooks and settings are in the Note Tiger app on the host PC.*');
+  return out.join('\n');
+}
 
 const client = new Client({
   intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildVoiceStates, GatewayIntentBits.GuildMembers],
@@ -711,14 +743,20 @@ client.on('interactionCreate', async (interaction) => {
     if (commandName === 'game') {
       const sub = interaction.options.getSubcommand();
       if (sub === 'books') {
-        const books = listBooks();
-        if (!books.length) return interaction.reply({ content: '📚 No rulebooks yet. Add PDFs in Note Tiger → **Library**.', flags: MessageFlags.Ephemeral });
+        const books = booksFor(gid);
+        const setup = serverSetup(gid);
+        if (!books.length) {
+          return interaction.reply({ content: setup.books
+            ? '📚 No rulebooks are turned on for this server. Pick them in Note Tiger → **Library** → **Books per server**.'
+            : '📚 No rulebooks yet. Add PDFs in Note Tiger → **Library**.', flags: MessageFlags.Ephemeral });
+        }
         const list = books.map((b) => `• **${b.title}**${b.indexed ? ` · ${b.pages} pages` : ' · *still reading…*'}${b.noText ? ' · ⚠️ no readable text (scanned?)' : ''}`).join('\n');
-        return interaction.reply(splitForDiscord(`📚 **Rulebooks I can search (${books.length})**\n${list}`)[0]);
+        const head = `📚 **Rulebooks I can search here${setup.game ? ` (${setup.game})` : ''}: ${books.length}**`;
+        return interaction.reply(splitForDiscord(`${head}\n${list}`)[0]);
       }
       const question = interaction.options.getString('question');
       await interaction.deferReply();
-      const { answer, cited } = await askBooks(question);
+      const { answer, cited } = await askBooks(question, { gid });
       // Asked during a session: it goes into that session's recap under Rules Calls.
       const rec = live.get(gid);
       if (rec && cited !== undefined) {
@@ -882,6 +920,15 @@ client.on('interactionCreate', async (interaction) => {
       if (!s) return interaction.reply({ content: 'No finished session found that far back.', flags: MessageFlags.Ephemeral });
       await interaction.reply(`🔁 Reposting **${s.title}** (${s.date})…`);
       await repostSession(guild, s.dir, interaction.channel);
+      return;
+    }
+
+    if (commandName === 'help') {
+      const pub = interaction.options.getBoolean('public');
+      const parts = splitForDiscord(helpText());
+      const opts = pub ? {} : { flags: MessageFlags.Ephemeral };
+      await interaction.reply({ content: parts[0], ...opts });
+      for (const p of parts.slice(1)) await interaction.followUp({ content: p, ...opts });
       return;
     }
 

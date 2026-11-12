@@ -61,6 +61,36 @@ export function listBooks() {
   });
 }
 
+// ---------- which books each Discord server uses ----------
+// library/servers.json: { "<server id>": { "game": "D&D 5e", "books": ["PHB.pdf", ...] } }
+// No entry (or no book list) = that server searches every book. Books are saved by file name so
+// re-indexing a PDF doesn't lose the setting.
+const SERVERS_FILE = path.join(LIB_DIR, 'servers.json');
+export function serverSetups() {
+  try { return JSON.parse(fs.readFileSync(SERVERS_FILE, 'utf8')) || {}; } catch { return {}; }
+}
+export function serverSetup(gid) {
+  const s = serverSetups()[gid] || {};
+  return { game: String(s.game || '').trim(), books: Array.isArray(s.books) ? s.books : null };
+}
+export function setServerSetup(gid, { game, books } = {}) {
+  if (!/^\d{5,25}$/.test(String(gid))) throw new Error('Unknown server.');
+  const all = serverSetups();
+  const known = new Set(pdfFiles().map((f) => path.basename(f)));
+  all[gid] = {
+    game: String(game || '').trim().slice(0, 60),
+    books: Array.isArray(books) ? [...new Set(books.map(String))].filter((f) => known.has(f)) : null,
+  };
+  fs.writeFileSync(SERVERS_FILE, JSON.stringify(all, null, 2));
+  return serverSetup(gid);
+}
+// The books a server can search (all of them unless it has its own list).
+export function booksFor(gid) {
+  const books = listBooks();
+  const pick = gid ? serverSetup(gid).books : null;
+  return pick ? books.filter((b) => pick.includes(b.file)) : books;
+}
+
 // ---------- reading a PDF ----------
 // Rebuilds readable lines from pdf.js text items (groups items on the same baseline).
 function pageText(items) {
@@ -258,9 +288,10 @@ function searcher() {
   return searchCache;
 }
 
-export function searchBooks(query, limit = 8) {
+export function searchBooks(query, limit = 8, onlyKeys = null) {
   const { ms, books } = searcher();
-  const raw = ms.search(query, { prefix: (t) => t.length > 3, fuzzy: (t) => (t.length > 5 ? 0.15 : 0), combineWith: 'OR' }).slice(0, 5000);
+  const filter = onlyKeys ? (h) => onlyKeys.has(h.book) : undefined;
+  const raw = ms.search(query, { prefix: (t) => t.length > 3, fuzzy: (t) => (t.length > 5 ? 0.15 : 0), combineWith: 'OR', filter }).slice(0, 5000);
   // Rules sections start with their name as a heading, so reward the words appearing together,
   // especially near the start of a passage or on a heading-like line (e.g. "MATRIX FIREWALL").
   const terms = query.toLowerCase().split(/[^a-z0-9']+/).filter((w) => w.length > 1 && !STOP.has(w));
@@ -301,7 +332,7 @@ export function searchBooks(query, limit = 8) {
   return out;
 }
 
-const RULES_SYSTEM = `You are a rules lookup assistant for a tabletop RPG group (mostly Shadowrun).
+const rulesSystem = (game) => `You are a rules lookup assistant for a tabletop RPG group${game ? ` playing ${game}` : ''}.
 You get a question and numbered excerpts from the group's own rulebooks, each with its book title and page.
 Answer using ONLY those excerpts, in this format (Discord markdown):
 
@@ -313,13 +344,18 @@ Rules: always give the page exactly as written in the excerpt label (e.g. "p. 25
 Summarize instead of copying long passages; never quote more than one short phrase.
 If the excerpts don't answer the question, say you couldn't find it in the books and suggest the closest page if any.`;
 
-export async function askBooks(question) {
-  const books = listBooks().filter((b) => b.indexed);
-  if (!books.length) return { answer: 'No rulebooks yet. Add your PDFs in Note Tiger → Library.', hits: [] };
-  const hits = searchBooks(question, 8);
+// gid = a Discord server: only its books (see servers.json). No gid = every book (the manager's Ask box).
+export async function askBooks(question, { gid } = {}) {
+  const books = booksFor(gid).filter((b) => b.indexed);
+  if (!books.length) {
+    return { answer: gid && serverSetup(gid).books
+      ? 'No rulebooks are turned on for this server. Pick them in Note Tiger → Library → Books per server.'
+      : 'No rulebooks yet. Add your PDFs in Note Tiger → Library.', hits: [] };
+  }
+  const hits = searchBooks(question, 8, gid ? new Set(books.map((b) => b.key)) : null);
   if (!hits.length) return { answer: `I couldn't find anything about that in your books (${books.length} indexed).`, hits: [] };
   const excerpts = hits.map((h, i) => `[${i + 1}] ${h.title}, ${h.pageLabel}:\n${h.text.slice(0, 1400)}`).join('\n\n');
-  const answer = await askAI(RULES_SYSTEM, `QUESTION: ${question}\n\nEXCERPTS:\n${excerpts}`, 600);
+  const answer = await askAI(rulesSystem(gid ? serverSetup(gid).game : ''), `QUESTION: ${question}\n\nEXCERPTS:\n${excerpts}`, 600);
   const slim = hits.map(({ title, pageLabel, page, printed, book }) => ({ title, pageLabel, page, printed, book }));
   return { answer, hits: slim, cited: citedHit(answer, slim) };
 }

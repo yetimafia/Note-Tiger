@@ -158,6 +158,12 @@ export function startWeb(ctx, port) {
           if (!question) return send(res, 400, { error: 'Type a question.' });
           return send(res, 200, await ctx.askBooks(String(question).slice(0, 500)));
         }
+        // Which books each Discord server searches (and what game it plays).
+        if (parts[2] === 'servers' && req.method === 'GET') return send(res, 200, ctx.serverBooks());
+        if (parts[2] === 'servers' && req.method === 'POST') {
+          const { gid, game, books } = await readBody(req);
+          return send(res, 200, ctx.setServerBooks(String(gid), { game, books: Array.isArray(books) ? books : null }));
+        }
         if (parts[2] === 'remove' && req.method === 'POST') { ctx.removeBook(String((await readBody(req)).key)); return send(res, 200, { ok: true }); }
         if (parts[2] === 'reindex' && req.method === 'POST') { ctx.reindexLibrary(); return send(res, 200, { ok: true }); }
         if (parts[2] === 'open' && req.method === 'POST') { ctx.openLibraryFolder(); return send(res, 200, { ok: true }); }

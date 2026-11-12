@@ -212,6 +212,7 @@
         <li><code>/session stop</code> at the end. The recap posts in <b>#recaps</b> a minute or two later, the full transcript in <b>#logs</b>, and both show up here under Sessions.</li>
         <li><code>/ask question:…</code> in Discord, or use the Ask tab here.</li>
         <li><code>/game ask question:…</code> looks things up in your rulebooks (add PDFs under Library).</li>
+        <li><code>/help</code> lists every command in Discord.</li>
       </ul>
     </div>
   </section>
@@ -305,6 +306,9 @@
     <div class="card" id="libDrop" style="border-style:dashed;text-align:center;color:var(--dim)">Drag PDFs here, or use <b>Add PDFs</b>. Everything stays on this computer.</div>
     <div id="libProg"></div>
     <div class="card"><h2>Books</h2><div id="libBooks"><div class="empty">Loading…</div></div></div>
+    <div class="card"><h2>Books per server</h2>
+      <div class="hint" style="margin-bottom:8px">Running different games on different servers? Pick which books each server's <code>/game ask</code> searches, so a D&amp;D server doesn't get Shadowrun answers. New servers search every book until you pick.</div>
+      <div id="libServers"><div class="empty">Loading…</div></div></div>
     <div class="card">
       <label class="switch"><input type="checkbox" id="libImages"> Attach a picture of the page to <code>/game ask</code> answers in Discord</label>
       <div class="hint">Shows the actual page (rules text, tables) under the answer. Saved right away.</div>
@@ -945,6 +949,49 @@ async function loadLibrary() {
     loadLibrary();
   });
   if (!$('#tab-library').hidden && (p || lib.books.some((b) => !b.indexed))) libTimer = setTimeout(loadLibrary, 1500);
+  // Only redraw the per-server card when the book list changes (and not while you're typing in it).
+  const sig = lib.books.map((b) => b.file).join('|');
+  if (sig !== libServersSig && !$('#libServers').contains(document.activeElement)) { libServersSig = sig; loadServerBooks(); }
+}
+
+let libServersSig = null;
+async function loadServerBooks() {
+  const box = $('#libServers');
+  const data = await api('/api/library/servers').catch((e) => { toast(e.message); return null; });
+  if (!data) return;
+  if (!data.guilds.length) { box.innerHTML = '<div class="empty">Invite the bot to a server first.</div>'; return; }
+  if (!libBookList.length) { box.innerHTML = '<div class="empty">Add some books first.</div>'; return; }
+  box.innerHTML = data.guilds.map((g) => {
+    const st = data.setups[g.id] || {};
+    const pick = Array.isArray(st.books) ? st.books : null;
+    return `<div class="srvbooks" data-gid="${esc(g.id)}" style="padding:10px 0;border-bottom:1px solid var(--line)">
+      <div class="row" style="justify-content:space-between;flex-wrap:wrap;gap:8px">
+        <b>${esc(g.name || g.id)}</b>
+        <label class="row" style="gap:6px">Game <input class="sb-game" placeholder="e.g. Shadowrun 6e or D&amp;D 5e" value="${esc(st.game || '')}" style="width:220px"></label>
+      </div>
+      <div class="row" style="gap:14px;margin:6px 0">
+        <label><input type="radio" name="sb-mode-${esc(g.id)}" value="all"${pick ? '' : ' checked'}> Every book</label>
+        <label><input type="radio" name="sb-mode-${esc(g.id)}" value="pick"${pick ? ' checked' : ''}> Only these:</label>
+      </div>
+      <div class="sb-list" style="display:${pick ? 'grid' : 'none'};grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:4px 12px;margin-left:4px">
+        ${libBookList.map((b) => `<label><input type="checkbox" value="${esc(b.file)}"${pick && pick.includes(b.file) ? ' checked' : ''}> ${esc(b.title)}</label>`).join('')}
+      </div>
+      <div class="row" style="margin-top:6px"><button class="btn sb-save">Save</button><span class="hint sb-msg"></span></div>
+    </div>`;
+  }).join('');
+  box.querySelectorAll('.srvbooks').forEach((el) => {
+    const list = el.querySelector('.sb-list');
+    el.querySelectorAll('input[type=radio]').forEach((r) => r.onchange = () => { list.style.display = r.value === 'pick' && r.checked ? 'grid' : 'none'; });
+    el.querySelector('.sb-save').onclick = async () => {
+      const pickMode = el.querySelector('input[type=radio][value=pick]').checked;
+      const books = pickMode ? [...list.querySelectorAll('input:checked')].map((c) => c.value) : null;
+      if (pickMode && !books.length && !confirm('No books ticked: /game ask will find nothing on this server. Save anyway?')) return;
+      try {
+        await api('/api/library/servers', { method: 'POST', body: { gid: el.dataset.gid, game: el.querySelector('.sb-game').value, books } });
+        el.querySelector('.sb-msg').textContent = `Saved ✓ ${pickMode ? `${books.length} book${books.length === 1 ? '' : 's'}` : 'every book'}`;
+      } catch (e) { toast(e.message); }
+    };
+  });
 }
 
 async function uploadBooks(files) {
