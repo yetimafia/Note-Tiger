@@ -1,5 +1,6 @@
-**New in 2.8.3**
-- 📚 **Drag-and-drop games in the Library.** Your books sit on a shelf with their real covers. Each Discord server is a game you can fold open or closed. Drag books from the shelf into a game, drag a book from one game to another to put a copy there too, and drop it back on the shelf (or click ×) to take it out. Type what game each server plays next to its name.
-- A game with no books still searches the whole shelf.
+**New in 2.8.4**
+- 📚 **Your shelf is sorted by game system.** Note Tiger reads each book and groups it (Shadowrun, Fallout, Vampire…), with the core rulebook on the front of each stack. Click a system to slide out every book in it.
+- Drag a whole system into a game at once, or single books. Drag a book onto another system to move it, double-click a system's name to rename it, and ★ picks a different cover.
+- Games show their books grouped the same way.
 
 Your settings, sessions and rulebooks are kept when you update.

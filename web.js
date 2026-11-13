@@ -163,6 +163,8 @@ export function startWeb(ctx, port) {
           if (!question) return send(res, 400, { error: 'Type a question.' });
           return send(res, 200, await ctx.askBooks(String(question).slice(0, 500)));
         }
+        // Shelf grouping: move a book to a system, rename a system, pick a system's cover book.
+        if (parts[2] === 'systems' && req.method === 'POST') return send(res, 200, ctx.librarySystem(await readBody(req)));
         // Which books each Discord server searches (and what game it plays).
         if (parts[2] === 'servers' && req.method === 'GET') return send(res, 200, ctx.serverBooks());
         if (parts[2] === 'servers' && req.method === 'POST') {

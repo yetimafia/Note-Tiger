@@ -91,6 +91,118 @@ export function booksFor(gid) {
   return pick ? books.filter((b) => pick.includes(b.file)) : books;
 }
 
+// ---------- game systems (for grouping the shelf) ----------
+// Each book is sorted into a game system by what its own pages talk about (a Shadowrun sourcebook says
+// "Shadowrun" all over its pages, even when the title is just "Run Faster"). You can move a book to another
+// system, rename a system, or pick which book is its cover. library/systems.json keeps your choices.
+const KNOWN_SYSTEMS = [
+  ['Shadowrun', /shadowrun|sixth world/gi],
+  ['Fallout', /fallout|vault-tec|nuka-cola/gi],
+  ['Vampire: The Masquerade', /vampire|masquerade|kindred|camarilla/gi],
+  ['Werewolf: The Apocalypse', /werewolf|garou|the apocalypse/gi],
+  ['Mage: The Ascension', /mage: the ascension|technocracy/gi],
+  ['Dungeons & Dragons', /dungeons (?:&|and) dragons|dungeon master|d&d/gi],
+  ['Pathfinder', /pathfinder|golarion/gi],
+  ['Starfinder', /starfinder/gi],
+  ['Call of Cthulhu', /call of cthulhu|cthulhu/gi],
+  ['Delta Green', /delta green/gi],
+  ['Cyberpunk', /cyberpunk|night city/gi],
+  ['Star Wars', /star wars|jedi/gi],
+  ['Warhammer', /warhammer|wrath (?:&|and) glory/gi],
+  ['Blades in the Dark', /blades in the dark|doskvol/gi],
+  ['Mothership', /mothership/gi],
+  ['Alien RPG', /alien rpg|weyland/gi],
+  ['Savage Worlds', /savage worlds/gi],
+  ['Lancer', /lancer/gi],
+  ['Daggerheart', /daggerheart/gi],
+  ['GURPS', /gurps/gi],
+];
+const SYSTEMS_FILE = path.join(LIB_DIR, 'systems.json');
+function readSystems() {
+  try {
+    const s = JSON.parse(fs.readFileSync(SYSTEMS_FILE, 'utf8'));
+    return { books: s.books || {}, covers: s.covers || {}, guess: s.guess || {} };
+  } catch { return { books: {}, covers: {}, guess: {} }; }
+}
+const writeSystems = (s) => fs.writeFileSync(SYSTEMS_FILE, JSON.stringify(s, null, 2));
+
+function guessSystem(book) {
+  // The title says it ("Shadowrun: Dark Terrors"): trust that over the pages (a horror sourcebook talks about vampires a lot).
+  for (const [name, re] of KNOWN_SYSTEMS) { re.lastIndex = 0; if (re.test(book.title)) return name; }
+  const idx = readIndex(book.key);
+  const text = idx ? idx.chunks.map((c) => c.text).join('\n') : '';
+  let best = null, bestN = 0;
+  for (const [name, re] of KNOWN_SYSTEMS) {
+    const n = (text.match(re) || []).length;
+    if (n > bestN) { best = name; bestN = n; }
+  }
+  if (best && bestN >= 3) return best;
+  // Unknown game: group by the first word of the title ("V20 Core" → "V20").
+  const first = book.title.split(/[\s_:-]+/)[0];
+  return first && first.length > 1 ? first : 'Other';
+}
+// Which book a player would be holding: the core rulebook (or player's handbook), else the biggest book.
+const CORE_RE = /\bcore\b|player'?s'? handbook|basic rules|rulebook|corebook|\bcrb\b/i;
+function pickCover(books) {
+  const score = (b) => (CORE_RE.test(b.title) || CORE_RE.test(b.file) ? 1e6 : 0) + (b.pages || 0);
+  return [...books].sort((a, b) => score(b) - score(a))[0];
+}
+
+// [{ name, cover: file, books: [file] }] in shelf order (biggest systems first).
+export function librarySystems() {
+  const books = listBooks();
+  const s = readSystems();
+  let changed = false;
+  const groups = new Map();
+  for (const b of books) {
+    let name = s.books[b.file];
+    if (!name) {
+      if (!b.indexed) name = s.guess[b.key] || '…'; // still reading: sort it once it's read
+      else {
+        if (!s.guess[b.key]) { s.guess[b.key] = guessSystem(b); changed = true; }
+        name = s.guess[b.key];
+      }
+    }
+    if (!groups.has(name)) groups.set(name, []);
+    groups.get(name).push(b);
+  }
+  // Forget guesses for books that are gone.
+  const keys = new Set(books.map((b) => b.key));
+  for (const k of Object.keys(s.guess)) if (!keys.has(k)) { delete s.guess[k]; changed = true; }
+  if (changed) writeSystems(s);
+  return [...groups.entries()].map(([name, list]) => {
+    const chosen = list.find((b) => b.file === s.covers[name]);
+    const cover = chosen || pickCover(list);
+    list.sort((a, b) => (a === cover ? -1 : b === cover ? 1 : a.title.localeCompare(b.title)));
+    return { name, cover: cover.file, books: list.map((b) => b.file) };
+  }).sort((a, b) => b.books.length - a.books.length || a.name.localeCompare(b.name));
+}
+
+const cleanName = (n) => String(n || '').replace(/\s+/g, ' ').trim().slice(0, 60);
+export function setBookSystem(file, name) {
+  name = cleanName(name);
+  if (!name) throw new Error('Give the system a name.');
+  const s = readSystems();
+  s.books[file] = name;
+  writeSystems(s);
+}
+export function renameSystem(from, to) {
+  to = cleanName(to);
+  if (!to) throw new Error('Give the system a name.');
+  const groups = librarySystems();
+  const g = groups.find((x) => x.name === from);
+  if (!g) throw new Error('System not found.');
+  const s = readSystems();
+  for (const f of g.books) s.books[f] = to;
+  if (s.covers[from]) { s.covers[to] = s.covers[from]; delete s.covers[from]; }
+  writeSystems(s);
+}
+export function setSystemCover(name, file) {
+  const s = readSystems();
+  s.covers[name] = file;
+  writeSystems(s);
+}
+
 // ---------- reading a PDF ----------
 // Rebuilds readable lines from pdf.js text items (groups items on the same baseline).
 function pageText(items) {

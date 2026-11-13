@@ -174,6 +174,37 @@
   .game .dropnote { color: var(--dim); font-size: 13px; align-self: center; margin: auto; }
   .game.flash > summary { animation: gflash .7s; }
   @keyframes gflash { 30% { background: #3a2c0c; } }
+
+  .sys { display: flex; align-items: flex-start; }
+  .sysbox { position: relative; width: 128px; cursor: pointer; user-select: none; z-index: 1; }
+  .sysbox .cov { width: 116px; height: 156px; border-radius: 4px 8px 8px 4px; overflow: hidden; background: var(--panel2);
+    border: 1px solid var(--line); box-shadow: 0 8px 18px rgba(0,0,0,.5), inset 4px 0 0 rgba(0,0,0,.35); display: grid; place-items: center; transition: transform .15s; }
+  .sysbox.stack2 .cov { box-shadow: 5px -5px 0 -1px #2c3446, 0 8px 18px rgba(0,0,0,.5); }
+  .sysbox.stack3 .cov { box-shadow: 5px -5px 0 -1px #2c3446, 10px -10px 0 -2px #232a39, 0 8px 18px rgba(0,0,0,.5); }
+  .sysbox:hover .cov { transform: translateY(-3px); }
+  .sysbox .cov img { width: 100%; height: 100%; object-fit: cover; pointer-events: none; }
+  .sysbox .cov .spine, .bk .cov .spine { padding: 8px; font-size: 12px; font-weight: 700; text-align: center; color: var(--accent); }
+  .sysname { font-weight: 700; font-size: 13px; margin-top: 8px; line-height: 1.25; }
+  .syscount { color: var(--dim); font-size: 12px; }
+  .syscount .tri, .sys .tri { display: inline-block; color: var(--accent); font-size: 10px; transition: transform .15s; }
+  .sys.open .syscount .tri { transform: rotate(90deg); }
+  .sysbox .x { position: absolute; top: -8px; right: 2px; width: 22px; height: 22px; border-radius: 50%; border: 0; background: var(--red); color: #fff;
+    font-weight: 700; cursor: pointer; display: none; padding: 0; z-index: 2; }
+  .sysbox:hover .x { display: block; }
+  .systray { display: none; flex-wrap: wrap; gap: 14px; align-content: flex-start; padding: 14px 18px 14px 26px; margin: 18px 0 0 -18px;
+    background: var(--panel2); border: 1px solid var(--line); border-radius: 12px 40px 40px 12px; max-width: 760px; }
+  .sys.open .systray { display: flex; animation: trayin .18s ease-out; }
+  .sys.open { flex-basis: 100%; }
+  @keyframes trayin { from { opacity: 0; transform: translateX(-12px); } }
+  .sys.over .sysbox .cov, .newsys.over { outline: 3px solid var(--accent); outline-offset: 3px; }
+  .bk .star { position: absolute; top: -7px; left: -7px; width: 22px; height: 22px; border-radius: 50%; border: 0; background: var(--accent); color: #1a1205;
+    font-size: 12px; cursor: pointer; display: none; padding: 0; }
+  .bk:hover .star { display: block; }
+  .newsys { width: 116px; height: 156px; border: 2px dashed var(--line); border-radius: 8px; display: grid; place-content: center; text-align: center;
+    color: var(--dim); font-size: 12px; line-height: 1.3; }
+  .newsys span { font-size: 26px; color: var(--accent); display: block; }
+  .shelf { gap: 22px 26px; }
+  .game .bkgrid { gap: 22px 26px; }
   .tag.tt { background: var(--bg); color: var(--dim); border: 1px solid var(--line); }
   .tview.hide-tt .tblock.tt { display: none; }
   .timeline { border-left: 2px solid var(--line); margin-left: 56px; }
@@ -339,8 +370,8 @@
     <div class="card" id="libDrop" style="border-style:dashed;text-align:center;color:var(--dim)">Drag PDFs here, or use <b>Add PDFs</b>. Everything stays on this computer.</div>
     <div id="libProg"></div>
     <div class="card"><h2>Books</h2><div id="libBooks"><div class="empty">Loading…</div></div></div>
-    <div class="card"><h2>Games</h2>
-      <div class="hint" style="margin-bottom:12px">Drag books from your shelf into a game. Each game is one of your Discord servers, and <code>/game ask</code> there only searches its books. Drag a book from one game to another to put a copy there too. A game with no books searches the whole shelf.</div>
+    <div class="card">
+      <div class="hint" style="margin-bottom:12px">Drag a system (or a single book) from your shelf into a game. Each game is one of your Discord servers, and <code>/game ask</code> there only searches its books. Drag from one game to another to put a copy there too; drop back on the shelf to take it out. A game with no books searches the whole shelf.</div>
       <div id="libServers"><div class="empty">Loading…</div></div></div>
     <div class="card">
       <label class="switch"><input type="checkbox" id="libImages"> Attach a picture of the page to <code>/game ask</code> answers in Discord</label>
@@ -966,6 +997,7 @@ async function loadLibrary() {
   const lib = await api('/api/library').catch((e) => { toast(e.message); return null; });
   if (!lib) return;
   libBookList = lib.books;
+  libSystems = lib.systems || [];
   const p = lib.progress;
   $('#libProg').innerHTML = p ? `<div class="prog"><b>📖 Reading ${esc(p.title || p.file)}…${p.pages ? ` ${Math.round((p.page / p.pages) * 100)}%` : ''}</b>
     <div class="track"><div class="fill" style="width:${p.pages ? Math.max(2, (p.page / p.pages) * 100) : 2}%"></div></div>
@@ -983,17 +1015,47 @@ async function loadLibrary() {
   });
   if (!$('#tab-library').hidden && (p || lib.books.some((b) => !b.indexed))) libTimer = setTimeout(loadLibrary, 1500);
   // Only redraw the per-server card when the book list changes (and not while you're typing in it).
-  const sig = lib.books.map((b) => b.file).join('|');
+  const sig = JSON.stringify(libSystems);
   if (sig !== libServersSig && !$('#libServers').contains(document.activeElement)) { libServersSig = sig; loadServerBooks(); }
 }
 
 let libServersSig = null;
 let libGames = null; // { guilds, setups }
-const coverTile = (b, gid) => `<div class="bk" draggable="true" data-file="${esc(b.file)}" data-from="${esc(gid || 'shelf')}" title="${esc(b.title)}">
-    <div class="cov"><img loading="lazy" src="/api/library/cover?book=${encodeURIComponent(b.key)}" alt="" onerror="this.replaceWith(Object.assign(document.createElement('div'),{className:'spine',textContent:this.closest('.bk').title}))"></div>
-    <div class="ttl">${esc(b.title)}</div>${gid ? '<button class="x" title="Take it out of this game">×</button>' : ''}</div>`;
-let gameOpen = {};
-try { gameOpen = JSON.parse(localStorage.getItem('nt-games-open') || '{}'); } catch { /* storage unavailable */ }
+let libSystems = [];  // [{ name, cover, books: [file] }]
+let gameOpen = {}, sysOpen = {};
+try { gameOpen = JSON.parse(localStorage.getItem('nt-games-open') || '{}'); sysOpen = JSON.parse(localStorage.getItem('nt-sys-open') || '{}'); } catch { /* storage unavailable */ }
+const remember = () => { try { localStorage.setItem('nt-games-open', JSON.stringify(gameOpen)); localStorage.setItem('nt-sys-open', JSON.stringify(sysOpen)); } catch { /* ignore */ } };
+
+const coverImg = (b) => `<img loading="lazy" src="/api/library/cover?book=${encodeURIComponent(b.key)}" alt=""
+  onerror="this.replaceWith(Object.assign(document.createElement('div'),{className:'spine',textContent:${esc(JSON.stringify(b.title))}}))">`;
+const bookTile = (b, where, sysName) => `<div class="bk" draggable="true" data-files="${esc(JSON.stringify([b.file]))}" data-from="${esc(where)}" title="${esc(b.title)}">
+    <div class="cov">${coverImg(b)}</div><div class="ttl">${esc(b.title)}</div>
+    ${where === 'shelf' ? `<button class="star" data-cover="${esc(b.file)}" data-sys="${esc(sysName)}" title="Use as the cover for ${esc(sysName)}">★</button>`
+      : '<button class="x" title="Take it out of this game">×</button>'}</div>`;
+
+// A game system as a stack: its core rulebook on the front, the rest in a tray that slides out.
+function systemStacks(files, where) {
+  const byFile = new Map(libBookList.map((b) => [b.file, b]));
+  const have = new Set(files);
+  return libSystems.map((sys) => {
+    const list = sys.books.filter((f) => have.has(f)).map((f) => byFile.get(f)).filter(Boolean);
+    if (!list.length) return '';
+    const front = list.find((b) => b.file === sys.cover) || list[0];
+    const id = `${where}|${sys.name}`;
+    const open = Boolean(sysOpen[id]);
+    const n = list.length;
+    return `<div class="sys${open ? ' open' : ''}" data-sys="${esc(sys.name)}" data-id="${esc(id)}">
+      <div class="sysbox${n > 2 ? ' stack3' : n > 1 ? ' stack2' : ''}" draggable="true" data-files="${esc(JSON.stringify(list.map((b) => b.file)))}" data-from="${esc(where)}"
+        title="${open ? 'Click to close' : 'Click to see every book'} · drag to move them all">
+        <div class="cov">${coverImg(front)}</div>
+        <div class="sysname"${where === 'shelf' ? ' title="Double-click to rename"' : ''}>${esc(sys.name)}</div>
+        <div class="syscount"><span class="tri">▶</span> ${n} book${n === 1 ? '' : 's'}</div>
+        ${where !== 'shelf' ? `<button class="x" title="Take all ${esc(sys.name)} books out of this game">×</button>` : ''}
+      </div>
+      <div class="systray">${list.map((b) => bookTile(b, where, sys.name)).join('')}</div>
+    </div>`;
+  }).join('');
+}
 
 async function loadServerBooks() {
   const data = await api('/api/library/servers').catch((e) => { toast(e.message); return null; });
@@ -1004,21 +1066,23 @@ async function loadServerBooks() {
 
 function drawGames() {
   const box = $('#libServers');
+  if (!libGames) return;
   const { guilds, setups } = libGames;
   if (!libBookList.length) { box.innerHTML = '<div class="empty">Add some books first.</div>'; return; }
-  const byFile = new Map(libBookList.map((b) => [b.file, b]));
-  let html = `<div class="hint" style="margin-bottom:6px">📚 Your shelf: drag from here. Drop a book back here to take it out of a game.</div>
-    <div class="bkgrid shelf" data-drop="shelf">${libBookList.map((b) => coverTile(b)).join('')}</div>`;
+  let html = `<div class="hint" style="margin-bottom:6px">📚 <b>Your shelf</b>, sorted by game system. Click a system to open it. Drag a book onto another system to move it, double-click a system's name to rename it, ★ picks its cover.</div>
+    <div class="bkgrid shelf" data-drop="shelf">${systemStacks(libBookList.map((b) => b.file), 'shelf')}
+      <div class="newsys" data-newsys="1"><span>＋</span>Drop a book here<br>for a new system</div></div>`;
+  html += `<h2 style="margin:22px 0 4px">🎲 Games</h2>`;
   if (!guilds.length) html += '<div class="empty">Invite the bot to a Discord server and it shows up here as a game.</div>';
   html += guilds.map((g) => {
     const st = setups[g.id] || {};
-    const books = (st.books || []).map((f) => byFile.get(f)).filter(Boolean);
+    const files = (st.books || []).filter((f) => libBookList.some((b) => b.file === f));
     const open = gameOpen[g.id] !== false;
     return `<details class="game" data-gid="${esc(g.id)}"${open ? ' open' : ''}>
       <summary><span class="tri">▶</span><span class="gname">${esc(g.name || g.id)}</span>
-        <span class="gcount">${books.length ? `${books.length} book${books.length === 1 ? '' : 's'}` : 'every book on the shelf'}</span>
+        <span class="gcount">${files.length ? `${files.length} book${files.length === 1 ? '' : 's'}` : 'every book on the shelf'}</span>
         <input class="g-game" placeholder="Game, e.g. D&amp;D 5e" value="${esc(st.game || '')}" title="What game this server plays (helps rules answers)"></summary>
-      <div class="bkgrid" data-drop="${esc(g.id)}">${books.map((b) => coverTile(b, g.id)).join('') || '<div class="dropnote">Drop books here</div>'}</div>
+      <div class="bkgrid" data-drop="${esc(g.id)}">${files.length ? systemStacks(files, g.id) : '<div class="dropnote">Drag a system or a book here</div>'}</div>
     </details>`;
   }).join('');
   box.innerHTML = html;
@@ -1028,52 +1092,105 @@ function drawGames() {
 async function saveGame(gid, change) {
   const st = libGames.setups[gid] || {};
   const next = { game: st.game || '', books: st.books || [], ...change };
-  const books = next.books.length ? next.books : null; // none picked = every book
   try {
-    const saved = await api('/api/library/servers', { method: 'POST', body: { gid, game: next.game, books } });
+    const saved = await api('/api/library/servers', { method: 'POST', body: { gid, game: next.game, books: next.books.length ? next.books : null } });
     libGames.setups[gid] = { game: saved.game, books: saved.books };
   } catch (e) { toast(e.message); }
 }
+async function shelfChange(body) {
+  try { libSystems = (await api('/api/library/systems', { method: 'POST', body })).systems; libServersSig = JSON.stringify(libSystems); }
+  catch (e) { toast(e.message); }
+}
 
-let dragBook = null; // { file, from }
+let dragBook = null; // { files, from }
 function wireGames() {
   const box = $('#libServers');
-  box.querySelectorAll('.bk').forEach((el) => {
+  box.querySelectorAll('[draggable=true]').forEach((el) => {
     el.ondragstart = (e) => {
-      dragBook = { file: el.dataset.file, from: el.dataset.from };
+      e.stopPropagation();
+      dragBook = { files: JSON.parse(el.dataset.files), from: el.dataset.from };
       e.dataTransfer.effectAllowed = 'copyMove';
-      e.dataTransfer.setData('text/plain', el.dataset.file);
+      e.dataTransfer.setData('text/plain', dragBook.files.join('\n'));
       setTimeout(() => el.classList.add('dragging'), 0);
     };
     el.ondragend = () => { el.classList.remove('dragging'); dragBook = null; box.querySelectorAll('.over').forEach((z) => z.classList.remove('over')); };
-    const x = el.querySelector('.x');
-    if (x) x.onclick = async (e) => { e.stopPropagation(); await removeFromGame(el.dataset.from, el.dataset.file); };
+  });
+  // Open / close a system.
+  box.querySelectorAll('.sysbox').forEach((el) => {
+    el.onclick = (e) => {
+      if (e.target.closest('.x')) return;
+      const sys = el.closest('.sys');
+      sys.classList.toggle('open');
+      sysOpen[sys.dataset.id] = sys.classList.contains('open');
+      remember();
+    };
+  });
+  box.querySelectorAll('.shelf .sysname').forEach((el) => {
+    el.ondblclick = async (e) => {
+      e.stopPropagation();
+      const from = el.closest('.sys').dataset.sys;
+      const to = prompt(`Rename "${from}" to:`, from);
+      if (!to || to.trim() === from) return;
+      await shelfChange({ action: 'rename', name: from, to });
+      drawGames();
+    };
+  });
+  box.querySelectorAll('.star').forEach((el) => {
+    el.onclick = async (e) => { e.stopPropagation(); await shelfChange({ action: 'cover', name: el.dataset.sys, file: el.dataset.cover }); drawGames(); };
+  });
+  box.querySelectorAll('.x').forEach((el) => {
+    el.onclick = async (e) => {
+      e.stopPropagation();
+      const src = el.closest('[data-files]');
+      await removeFromGame(src.dataset.from, JSON.parse(src.dataset.files));
+    };
   });
   box.querySelectorAll('[data-drop]').forEach((zone) => {
     const target = zone.dataset.drop;
+    const sysUnder = (e) => (target === 'shelf' ? e.target.closest('.sys, .newsys') : null);
     zone.ondragover = (e) => {
-      if (!dragBook || dragBook.from === target || (target === 'shelf' && dragBook.from === 'shelf')) return;
+      if (!dragBook) return;
+      const under = sysUnder(e);
+      if (target === 'shelf' && dragBook.from === 'shelf') {
+        // Moving a book between systems: only onto a different system (or "new system").
+        box.querySelectorAll('.shelf .over').forEach((z) => z !== under && z.classList.remove('over'));
+        if (!under || (under.dataset.sys && JSON.parse(under.querySelector('.sysbox').dataset.files).includes(dragBook.files[0]))) return;
+        e.preventDefault(); e.dataTransfer.dropEffect = 'move'; under.classList.add('over');
+        return;
+      }
+      if (dragBook.from === target) return;
       e.preventDefault();
       e.dataTransfer.dropEffect = target === 'shelf' ? 'move' : 'copy';
       zone.classList.add('over');
     };
-    zone.ondragleave = (e) => { if (!zone.contains(e.relatedTarget)) zone.classList.remove('over'); };
+    zone.ondragleave = (e) => { if (!zone.contains(e.relatedTarget)) { zone.classList.remove('over'); zone.querySelectorAll('.over').forEach((z) => z.classList.remove('over')); } };
     zone.ondrop = async (e) => {
       e.preventDefault();
       zone.classList.remove('over');
       const d = dragBook; dragBook = null;
       if (!d) return;
-      if (target === 'shelf') return removeFromGame(d.from, d.file);
+      if (target === 'shelf') {
+        if (d.from !== 'shelf') return removeFromGame(d.from, d.files);
+        const under = sysUnder(e);
+        if (!under) return;
+        const name = under.dataset.newsys ? prompt('Name the new game system:', '') : under.dataset.sys;
+        if (!name) { drawGames(); return; }
+        for (const f of d.files) await shelfChange({ action: 'move', file: f, name });
+        sysOpen[`shelf|${name.trim()}`] = true; remember();
+        drawGames();
+        return;
+      }
       const cur = libGames.setups[target]?.books || [];
-      if (cur.includes(d.file)) { toast('That game already has this book.'); return; }
-      await saveGame(target, { books: [...cur, d.file] });
-      gameOpen[target] = true;
+      const add = d.files.filter((f) => !cur.includes(f));
+      if (!add.length) { toast('That game already has these books.'); return; }
+      await saveGame(target, { books: [...cur, ...add] });
+      gameOpen[target] = true; remember();
       drawGames();
       $(`#libServers .game[data-gid="${target}"]`)?.classList.add('flash');
     };
   });
   box.querySelectorAll('.game').forEach((g) => {
-    g.ontoggle = () => { gameOpen[g.dataset.gid] = g.open; try { localStorage.setItem('nt-games-open', JSON.stringify(gameOpen)); } catch { /* ignore */ } };
+    g.ontoggle = () => { gameOpen[g.dataset.gid] = g.open; remember(); };
     const inp = g.querySelector('.g-game');
     inp.onclick = (e) => e.preventDefault(); // typing in the name shouldn't fold the game
     inp.onkeydown = (e) => { if (e.key === ' ') e.stopPropagation(); if (e.key === 'Enter') inp.blur(); };
@@ -1082,10 +1199,10 @@ function wireGames() {
   });
 }
 
-async function removeFromGame(gid, file) {
+async function removeFromGame(gid, files) {
   if (!gid || gid === 'shelf') return;
   const cur = libGames.setups[gid]?.books || [];
-  await saveGame(gid, { books: cur.filter((f) => f !== file) });
+  await saveGame(gid, { books: cur.filter((f) => !files.includes(f)) });
   drawGames();
 }
 

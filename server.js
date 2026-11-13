@@ -17,7 +17,7 @@ import { campaignBook } from './book.js';
 import { recapSession, askArchive, ollamaStatus, refreshOllama, AI_LABEL, getProgress, askAI } from './ai.js';
 import { startWeb } from './web.js';
 import { publishSite, siteStatus, siteConfigured } from './site.js';
-import { LIB_DIR, listBooks, syncLibrary, libraryProgress, addBook, removeBook, askBooks, renderPage, serverSetups, setServerSetup, bookCover } from './library.js';
+import { LIB_DIR, listBooks, syncLibrary, libraryProgress, addBook, removeBook, askBooks, renderPage, serverSetups, setServerSetup, bookCover, librarySystems, setBookSystem, renameSystem, setSystemCover } from './library.js';
 
 const RESTART_CODE = 75; // the launcher restarts the manager when it exits with this code
 
@@ -254,7 +254,14 @@ startWeb({
     refreshSiteSoon();
     return this.campaign(gid);
   },
-  library() { return { books: listBooks(), progress: libraryProgress(), folder: LIB_DIR }; },
+  library() { return { books: listBooks(), systems: librarySystems(), progress: libraryProgress(), folder: LIB_DIR }; },
+  librarySystem({ action, file, name, to }) {
+    if (action === 'move') setBookSystem(String(file), name);
+    else if (action === 'rename') renameSystem(String(name), to);
+    else if (action === 'cover') setSystemCover(String(name), String(file));
+    else throw new Error('Unknown change.');
+    return { systems: librarySystems() };
+  },
   addBook(name, buffer) { return addBook(name, buffer); },
   removeBook(key) { removeBook(key); },
   askBooks(question, gid) { return askBooks(question, { gid }); },
