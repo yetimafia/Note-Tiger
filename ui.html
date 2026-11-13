@@ -141,6 +141,39 @@
   .tblock.tt .tl, .tblock.rc .tl { font-style: italic; }
   .tblock.rc { opacity: .6; }
   .tblock.note { background: #1a1e27; }
+
+  /* ---------- Library: shelf + games (drag and drop) ---------- */
+  .bkgrid { display: flex; flex-wrap: wrap; gap: 14px; min-height: 172px; padding: 12px; border-radius: 10px; }
+  .bk { position: relative; width: 104px; cursor: grab; user-select: none; transition: transform .12s; }
+  .bk:hover { transform: translateY(-3px); }
+  .bk.dragging { opacity: .35; }
+  .bk .cov { width: 104px; height: 140px; border-radius: 4px 7px 7px 4px; overflow: hidden; background: var(--panel2);
+    box-shadow: 0 6px 14px rgba(0,0,0,.45), inset 4px 0 0 rgba(0,0,0,.35); border: 1px solid var(--line); display: grid; place-items: center; }
+  .bk .cov img { width: 100%; height: 100%; object-fit: cover; display: block; pointer-events: none; }
+  .bk .cov .spine { padding: 8px; font-size: 12px; font-weight: 700; text-align: center; color: var(--accent); }
+  .bk .ttl { font-size: 11.5px; color: var(--dim); margin-top: 6px; line-height: 1.25; max-height: 2.5em; overflow: hidden; text-align: center; }
+  .bk .x { position: absolute; top: -7px; right: -7px; width: 22px; height: 22px; border-radius: 50%; border: 0; background: var(--red); color: #fff;
+    font-weight: 700; cursor: pointer; display: none; line-height: 22px; padding: 0; }
+  .bk:hover .x { display: block; }
+  .shelf { background: linear-gradient(var(--bg), var(--bg)) padding-box; border: 1px solid var(--line); margin-bottom: 18px; }
+  .shelf.over { border-color: var(--red); background: #2a1418; }
+  .game { border: 1px solid var(--line); border-radius: 12px; margin-bottom: 12px; background: var(--panel2); overflow: hidden; }
+  .game > summary { list-style: none; display: flex; align-items: center; gap: 12px; padding: 12px 16px; cursor: pointer; }
+  .game > summary::-webkit-details-marker { display: none; }
+  .game > summary .tri { color: var(--accent); transition: transform .15s; font-size: 12px; }
+  .game[open] > summary .tri { transform: rotate(90deg); }
+  .game > summary .gname { font-weight: 700; }
+  .game > summary .gcount { color: var(--dim); font-size: 13px; }
+  .game > summary input { margin-left: auto; width: 210px; background: var(--bg); color: var(--text); border: 1px solid var(--line);
+    border-radius: 8px; padding: 6px 10px; font: inherit; font-size: 13px; outline: none; }
+  .game > summary input:focus { border-color: var(--accent); }
+  .game > summary input::placeholder { color: var(--dim); }
+  .game .bkgrid { min-height: 150px; }
+  .game .bkgrid { margin: 0 12px 12px; border: 2px dashed var(--line); background: var(--bg); transition: border-color .12s, background .12s; }
+  .game .bkgrid.over { border-color: var(--accent); background: #211a0c; }
+  .game .dropnote { color: var(--dim); font-size: 13px; align-self: center; margin: auto; }
+  .game.flash > summary { animation: gflash .7s; }
+  @keyframes gflash { 30% { background: #3a2c0c; } }
   .tag.tt { background: var(--bg); color: var(--dim); border: 1px solid var(--line); }
   .tview.hide-tt .tblock.tt { display: none; }
   .timeline { border-left: 2px solid var(--line); margin-left: 56px; }
@@ -306,8 +339,8 @@
     <div class="card" id="libDrop" style="border-style:dashed;text-align:center;color:var(--dim)">Drag PDFs here, or use <b>Add PDFs</b>. Everything stays on this computer.</div>
     <div id="libProg"></div>
     <div class="card"><h2>Books</h2><div id="libBooks"><div class="empty">Loading…</div></div></div>
-    <div class="card"><h2>Books per server</h2>
-      <div class="hint" style="margin-bottom:8px">Running different games on different servers? Pick which books each server's <code>/game ask</code> searches, so a D&amp;D server doesn't get Shadowrun answers. New servers search every book until you pick.</div>
+    <div class="card"><h2>Games</h2>
+      <div class="hint" style="margin-bottom:12px">Drag books from your shelf into a game. Each game is one of your Discord servers, and <code>/game ask</code> there only searches its books. Drag a book from one game to another to put a copy there too. A game with no books searches the whole shelf.</div>
       <div id="libServers"><div class="empty">Loading…</div></div></div>
     <div class="card">
       <label class="switch"><input type="checkbox" id="libImages"> Attach a picture of the page to <code>/game ask</code> answers in Discord</label>
@@ -955,43 +988,105 @@ async function loadLibrary() {
 }
 
 let libServersSig = null;
+let libGames = null; // { guilds, setups }
+const coverTile = (b, gid) => `<div class="bk" draggable="true" data-file="${esc(b.file)}" data-from="${esc(gid || 'shelf')}" title="${esc(b.title)}">
+    <div class="cov"><img loading="lazy" src="/api/library/cover?book=${encodeURIComponent(b.key)}" alt="" onerror="this.replaceWith(Object.assign(document.createElement('div'),{className:'spine',textContent:this.closest('.bk').title}))"></div>
+    <div class="ttl">${esc(b.title)}</div>${gid ? '<button class="x" title="Take it out of this game">×</button>' : ''}</div>`;
+let gameOpen = {};
+try { gameOpen = JSON.parse(localStorage.getItem('nt-games-open') || '{}'); } catch { /* storage unavailable */ }
+
 async function loadServerBooks() {
-  const box = $('#libServers');
   const data = await api('/api/library/servers').catch((e) => { toast(e.message); return null; });
   if (!data) return;
-  if (!data.guilds.length) { box.innerHTML = '<div class="empty">Invite the bot to a server first.</div>'; return; }
+  libGames = data;
+  drawGames();
+}
+
+function drawGames() {
+  const box = $('#libServers');
+  const { guilds, setups } = libGames;
   if (!libBookList.length) { box.innerHTML = '<div class="empty">Add some books first.</div>'; return; }
-  box.innerHTML = data.guilds.map((g) => {
-    const st = data.setups[g.id] || {};
-    const pick = Array.isArray(st.books) ? st.books : null;
-    return `<div class="srvbooks" data-gid="${esc(g.id)}" style="padding:10px 0;border-bottom:1px solid var(--line)">
-      <div class="row" style="justify-content:space-between;flex-wrap:wrap;gap:8px">
-        <b>${esc(g.name || g.id)}</b>
-        <label class="row" style="gap:6px">Game <input class="sb-game" placeholder="e.g. Shadowrun 6e or D&amp;D 5e" value="${esc(st.game || '')}" style="width:220px"></label>
-      </div>
-      <div class="row" style="gap:14px;margin:6px 0">
-        <label><input type="radio" name="sb-mode-${esc(g.id)}" value="all"${pick ? '' : ' checked'}> Every book</label>
-        <label><input type="radio" name="sb-mode-${esc(g.id)}" value="pick"${pick ? ' checked' : ''}> Only these:</label>
-      </div>
-      <div class="sb-list" style="display:${pick ? 'grid' : 'none'};grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:4px 12px;margin-left:4px">
-        ${libBookList.map((b) => `<label><input type="checkbox" value="${esc(b.file)}"${pick && pick.includes(b.file) ? ' checked' : ''}> ${esc(b.title)}</label>`).join('')}
-      </div>
-      <div class="row" style="margin-top:6px"><button class="btn sb-save">Save</button><span class="hint sb-msg"></span></div>
-    </div>`;
+  const byFile = new Map(libBookList.map((b) => [b.file, b]));
+  let html = `<div class="hint" style="margin-bottom:6px">📚 Your shelf: drag from here. Drop a book back here to take it out of a game.</div>
+    <div class="bkgrid shelf" data-drop="shelf">${libBookList.map((b) => coverTile(b)).join('')}</div>`;
+  if (!guilds.length) html += '<div class="empty">Invite the bot to a Discord server and it shows up here as a game.</div>';
+  html += guilds.map((g) => {
+    const st = setups[g.id] || {};
+    const books = (st.books || []).map((f) => byFile.get(f)).filter(Boolean);
+    const open = gameOpen[g.id] !== false;
+    return `<details class="game" data-gid="${esc(g.id)}"${open ? ' open' : ''}>
+      <summary><span class="tri">▶</span><span class="gname">${esc(g.name || g.id)}</span>
+        <span class="gcount">${books.length ? `${books.length} book${books.length === 1 ? '' : 's'}` : 'every book on the shelf'}</span>
+        <input class="g-game" placeholder="Game, e.g. D&amp;D 5e" value="${esc(st.game || '')}" title="What game this server plays (helps rules answers)"></summary>
+      <div class="bkgrid" data-drop="${esc(g.id)}">${books.map((b) => coverTile(b, g.id)).join('') || '<div class="dropnote">Drop books here</div>'}</div>
+    </details>`;
   }).join('');
-  box.querySelectorAll('.srvbooks').forEach((el) => {
-    const list = el.querySelector('.sb-list');
-    el.querySelectorAll('input[type=radio]').forEach((r) => r.onchange = () => { list.style.display = r.value === 'pick' && r.checked ? 'grid' : 'none'; });
-    el.querySelector('.sb-save').onclick = async () => {
-      const pickMode = el.querySelector('input[type=radio][value=pick]').checked;
-      const books = pickMode ? [...list.querySelectorAll('input:checked')].map((c) => c.value) : null;
-      if (pickMode && !books.length && !confirm('No books ticked: /game ask will find nothing on this server. Save anyway?')) return;
-      try {
-        await api('/api/library/servers', { method: 'POST', body: { gid: el.dataset.gid, game: el.querySelector('.sb-game').value, books } });
-        el.querySelector('.sb-msg').textContent = `Saved ✓ ${pickMode ? `${books.length} book${books.length === 1 ? '' : 's'}` : 'every book'}`;
-      } catch (e) { toast(e.message); }
+  box.innerHTML = html;
+  wireGames();
+}
+
+async function saveGame(gid, change) {
+  const st = libGames.setups[gid] || {};
+  const next = { game: st.game || '', books: st.books || [], ...change };
+  const books = next.books.length ? next.books : null; // none picked = every book
+  try {
+    const saved = await api('/api/library/servers', { method: 'POST', body: { gid, game: next.game, books } });
+    libGames.setups[gid] = { game: saved.game, books: saved.books };
+  } catch (e) { toast(e.message); }
+}
+
+let dragBook = null; // { file, from }
+function wireGames() {
+  const box = $('#libServers');
+  box.querySelectorAll('.bk').forEach((el) => {
+    el.ondragstart = (e) => {
+      dragBook = { file: el.dataset.file, from: el.dataset.from };
+      e.dataTransfer.effectAllowed = 'copyMove';
+      e.dataTransfer.setData('text/plain', el.dataset.file);
+      setTimeout(() => el.classList.add('dragging'), 0);
+    };
+    el.ondragend = () => { el.classList.remove('dragging'); dragBook = null; box.querySelectorAll('.over').forEach((z) => z.classList.remove('over')); };
+    const x = el.querySelector('.x');
+    if (x) x.onclick = async (e) => { e.stopPropagation(); await removeFromGame(el.dataset.from, el.dataset.file); };
+  });
+  box.querySelectorAll('[data-drop]').forEach((zone) => {
+    const target = zone.dataset.drop;
+    zone.ondragover = (e) => {
+      if (!dragBook || dragBook.from === target || (target === 'shelf' && dragBook.from === 'shelf')) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = target === 'shelf' ? 'move' : 'copy';
+      zone.classList.add('over');
+    };
+    zone.ondragleave = (e) => { if (!zone.contains(e.relatedTarget)) zone.classList.remove('over'); };
+    zone.ondrop = async (e) => {
+      e.preventDefault();
+      zone.classList.remove('over');
+      const d = dragBook; dragBook = null;
+      if (!d) return;
+      if (target === 'shelf') return removeFromGame(d.from, d.file);
+      const cur = libGames.setups[target]?.books || [];
+      if (cur.includes(d.file)) { toast('That game already has this book.'); return; }
+      await saveGame(target, { books: [...cur, d.file] });
+      gameOpen[target] = true;
+      drawGames();
+      $(`#libServers .game[data-gid="${target}"]`)?.classList.add('flash');
     };
   });
+  box.querySelectorAll('.game').forEach((g) => {
+    g.ontoggle = () => { gameOpen[g.dataset.gid] = g.open; try { localStorage.setItem('nt-games-open', JSON.stringify(gameOpen)); } catch { /* ignore */ } };
+    const inp = g.querySelector('.g-game');
+    inp.onclick = (e) => e.preventDefault(); // typing in the name shouldn't fold the game
+    inp.onkeydown = (e) => { if (e.key === ' ') e.stopPropagation(); if (e.key === 'Enter') inp.blur(); };
+    inp.onkeyup = (e) => e.preventDefault();
+    inp.onchange = () => saveGame(g.dataset.gid, { game: inp.value }).then(() => toast('Saved'));
+  });
+}
+
+async function removeFromGame(gid, file) {
+  if (!gid || gid === 'shelf') return;
+  const cur = libGames.setups[gid]?.books || [];
+  await saveGame(gid, { books: cur.filter((f) => f !== file) });
+  drawGames();
 }
 
 async function uploadBooks(files) {

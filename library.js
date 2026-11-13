@@ -186,6 +186,15 @@ export async function renderPage(key, pdfPage, width = 1100) {
   }
 }
 
+// A small picture of a book's first page, for the Library shelf. Drawn once, then kept.
+export async function bookCover(key) {
+  const file = path.join(INDEX_DIR, `cover-${String(key).replace(/[^a-f0-9]/g, '')}.png`);
+  try { return fs.readFileSync(file); } catch { /* not drawn yet */ }
+  const png = await renderPage(key, 1, 300);
+  fs.writeFileSync(file, png);
+  return png;
+}
+
 // The page an answer is mainly about: the first page it cites, matched to a search hit.
 // Title, page count and printed page label for one PDF page (for the page-turn buttons).
 export function pageInfo(key, pdfPage) {
@@ -375,5 +384,6 @@ export function removeBook(key) {
   if (!book) throw new Error('Book not found.');
   fs.rmSync(path.join(LIB_DIR, book.file), { force: true });
   fs.rmSync(indexFile(key), { force: true });
+  fs.rmSync(path.join(INDEX_DIR, `cover-${key}.png`), { force: true });
   searchCache = null;
 }

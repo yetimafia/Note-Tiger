@@ -1,5 +1,5 @@
-**New in 2.8.2**
-- 📚 **Books per server.** Running more than one game on the same bot? In Library → **Books per server**, pick which rulebooks each Discord server searches and what game it plays. A D&D server won't get Shadowrun answers anymore. Servers you haven't set up still search every book.
-- ❓ **`/help`** lists every command and what it does (only you see it, unless you pick `public`).
+**New in 2.8.3**
+- 📚 **Drag-and-drop games in the Library.** Your books sit on a shelf with their real covers. Each Discord server is a game you can fold open or closed. Drag books from the shelf into a game, drag a book from one game to another to put a copy there too, and drop it back on the shelf (or click ×) to take it out. Type what game each server plays next to its name.
+- A game with no books still searches the whole shelf.
 
 Your settings, sessions and rulebooks are kept when you update.

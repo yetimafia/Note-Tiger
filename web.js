@@ -153,6 +153,11 @@ export function startWeb(ctx, port) {
           res.writeHead(200, { 'Content-Type': 'image/png', 'Cache-Control': 'max-age=3600' });
           return res.end(png);
         }
+        if (parts[2] === 'cover' && req.method === 'GET') {
+          const png = await ctx.bookCover(String(url.searchParams.get('book')));
+          res.writeHead(200, { 'Content-Type': 'image/png', 'Cache-Control': 'max-age=86400' });
+          return res.end(png);
+        }
         if (parts[2] === 'ask' && req.method === 'POST') {
           const { question } = await readBody(req);
           if (!question) return send(res, 400, { error: 'Type a question.' });
