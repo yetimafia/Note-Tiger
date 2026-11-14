@@ -10,11 +10,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { PDFDocument, PDFCheckBox, PDFTextField, PDFDropdown, PDFRadioGroup } from 'pdf-lib';
-import { DATA_DIR } from './config.js';
-import { LIB_DIR } from './library.js';
+import { DATA_DIR, APP_DIR } from './config.js';
 
 const require = createRequire(import.meta.url);
-export const SHEETS_DIR = path.join(LIB_DIR, 'sheets');
+// Same folder as the rulebook library (library.js), named here so sheets.js doesn't import it (that would be a loop).
+export const SHEETS_DIR = path.join(APP_DIR, 'library', 'sheets');
 fs.mkdirSync(SHEETS_DIR, { recursive: true });
 
 // ---------- the character ----------

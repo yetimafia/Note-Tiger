@@ -851,7 +851,7 @@ client.on('interactionCreate', async (interaction) => {
             ? '📚 No rulebooks are turned on for this server. Pick them in Note Tiger → **Library** → **Books per server**.'
             : '📚 No rulebooks yet. Add PDFs in Note Tiger → **Library**.', flags: MessageFlags.Ephemeral });
         }
-        const list = books.map((b) => `• **${b.title}**${b.indexed ? ` · ${b.pages} pages` : ' · *still reading…*'}${b.noText ? ' · ⚠️ no readable text (scanned?)' : ''}`).join('\n');
+        const list = books.map((b) => `• **${b.title}**${b.indexed ? ` · ${b.pages} pages` : ' · *still reading…*'}${b.ocrPending ? ' · 📷 scanned, still being read' : b.noText ? ' · ⚠️ no readable text' : ''}`).join('\n');
         const head = `📚 **Rulebooks I can search here${setup.game ? ` (${setup.game})` : ''}: ${books.length}**`;
         return interaction.reply(splitForDiscord(`${head}\n${list}`)[0]);
       }

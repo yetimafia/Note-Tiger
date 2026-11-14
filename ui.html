@@ -1078,12 +1078,13 @@ async function loadLibrary() {
   libBookList = lib.books;
   libSystems = lib.systems || [];
   const p = lib.progress;
-  $('#libProg').innerHTML = p ? `<div class="prog"><b>📖 Reading ${esc(p.title || p.file)}…${p.pages ? ` ${Math.round((p.page / p.pages) * 100)}%` : ''}</b>
+  $('#libProg').innerHTML = p ? `<div class="prog"><b>${p.ocr ? '📷 Reading the scanned pages of' : '📖 Reading'} ${esc(p.title || p.file)}…${p.pages ? ` ${Math.round((p.page / p.pages) * 100)}%` : ''}</b>
     <div class="track"><div class="fill" style="width:${p.pages ? Math.max(2, (p.page / p.pages) * 100) : 2}%"></div></div>
-    <div class="row2"><span>${p.pages ? `Page ${p.page} of ${p.pages}` : 'Opening…'}</span><span>${p.queue > 1 ? `${p.queue - 1} more book${p.queue > 2 ? 's' : ''} after this` : ''}</span></div></div>` : '';
+    <div class="row2"><span>${p.pages ? `Page ${p.page} of ${p.pages}${p.ocr ? ' (text recognition: a few seconds a page)' : ''}` : 'Opening…'}</span><span>${p.queue > 1 ? `${p.queue - 1} more book${p.queue > 2 ? 's' : ''} after this` : ''}</span></div></div>` : '';
   $('#libBooks').innerHTML = lib.books.length ? lib.books.map((b) => `<div class="row" style="justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--line)">
       <div style="min-width:0"><b>${esc(b.title)}</b><div class="hint">${esc(b.file)} · ${b.sizeMb || "<0.1"} MB${b.indexed ? ` · ${b.pages} pages` : ''}${b.indexed && b.offset === null ? ' · page numbers not found, using PDF pages' : ''}</div></div>
-      <div class="row">${b.noText ? '<span class="tag norecap" title="This PDF seems to be scanned images, so its text can\'t be read">⚠️ no readable text</span>'
+      <div class="row">${b.ocrPending ? '<span class="tag" title="This PDF is pictures of pages. Note Tiger is reading them with text recognition (a few seconds a page); it\'s searchable when that finishes.">📷 scanned: reading the pictures</span>'
+        : b.noText ? '<span class="tag norecap" title="Text recognition found almost no text in this PDF">⚠️ no readable text</span>'
         : b.indexed ? '<span class="tag" style="background:#102a20;color:#a8f0cf">✓ searchable</span>' : b.indexing ? '<span class="tag norecap">reading…</span>' : '<span class="tag norecap">waiting</span>'}
       <button class="btn danger" data-rm="${esc(b.key)}" data-title="${esc(b.title)}">Remove</button></div></div>`).join('')
     : '<div class="empty">No books yet. Add your rulebook PDFs to get started.</div>';

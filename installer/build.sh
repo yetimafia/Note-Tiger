@@ -34,6 +34,8 @@ for d in "$STAGE"/app/node_modules/onnxruntime-node/bin/napi-v*/; do
   rm -rf "$d/darwin" "$d/linux" "$d/win32/arm64"
 done
 rm -rf "$STAGE"/app/node_modules/@types
+# Text recognition uses only the small "best_int" English data.
+rm -rf "$STAGE"/app/node_modules/@tesseract.js-data/eng/4.0.0
 # PDF reader: only the Node build, fonts, character maps and wasm are needed (no browser viewer).
 rm -rf "$STAGE"/app/node_modules/pdfjs-dist/{web,types,build,image_decoders,webpack.mjs}
 # Windows ships an older onnxruntime.dll in System32. Put the speech engine's own DLLs next to node.exe,

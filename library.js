@@ -57,6 +57,7 @@ export function listBooks() {
       indexed: Boolean(idx), ...(meta || { title: niceTitle(file) }),
       indexing: progress.active?.file === path.basename(file),
       noText: Boolean(idx && idx.textPages < Math.max(3, idx.pages * 0.1)),
+      ocr: Boolean(idx?.ocr), ocrPending: Boolean(idx && needsOcr(idx)),
     };
   });
 }
@@ -361,6 +362,92 @@ async function indexBook(file) {
   return index;
 }
 
+// ---------- scanned books: text recognition (OCR) ----------
+// Some PDFs are just pictures of pages (no text behind them). Tesseract (free, runs here, English) reads the
+// pictures. It's slow (a few seconds a page), so it runs after all other books, one page at a time, and saves as it
+// goes (library/.index/<key>.ocr) so a restart picks up where it stopped.
+const needsOcr = (idx) => !idx.ocr && idx.pages > 0 && idx.textPages < Math.max(3, idx.pages * 0.1);
+const OCR_WIDTH = 1700; // pixels across: big enough for small print, small enough to stay quick
+
+async function makeOcrWorker() {
+  const { createWorker } = await import('tesseract.js');
+  const dataDir = path.dirname(require.resolve('@tesseract.js-data/eng/package.json'));
+  return createWorker('eng', 1, {
+    langPath: path.join(dataDir, '4.0.0_best_int'), gzip: true,
+    cachePath: INDEX_DIR, cacheMethod: 'none', logger: () => {}, errorHandler: (e) => console.error('[ocr]', e),
+  });
+}
+
+async function ocrBook(file, idx, queue = 1) {
+  const key = idx.key;
+  const doneFile = path.join(INDEX_DIR, `${key}.ocr`);
+  const done = new Map();
+  try {
+    for (const line of fs.readFileSync(doneFile, 'utf8').split('\n')) {
+      if (!line) continue;
+      const { p, text } = JSON.parse(line);
+      done.set(p, text);
+    }
+  } catch { /* first time */ }
+  console.log(`[library] "${idx.title}" is scanned (no text): reading its ${idx.pages} pages with text recognition${done.size ? ` (${done.size} already done)` : ''}`);
+  const t0 = Date.now();
+  const worker = await makeOcrWorker();
+  const { task, doc } = await openPdf(file, { forDrawing: true });
+  const { createCanvas } = await import('@napi-rs/canvas');
+  try {
+    for (let p = 1; p <= doc.numPages; p++) {
+      progress.active = { file: path.basename(file), title: idx.title, page: p, pages: doc.numPages, queue, ocr: true };
+      if (done.has(p)) continue;
+      let text = '';
+      try {
+        const page = await doc.getPage(p);
+        const base = page.getViewport({ scale: 1 });
+        const viewport = page.getViewport({ scale: Math.min(4, OCR_WIDTH / base.width) });
+        const canvas = createCanvas(Math.ceil(viewport.width), Math.ceil(viewport.height));
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        await page.render({ canvasContext: ctx, canvas, viewport }).promise;
+        page.cleanup();
+        const { data } = await worker.recognize(canvas.toBuffer('image/png'));
+        text = cleanOcr(data.text || '');
+      } catch (err) {
+        console.error(`[library] OCR page ${p} of ${idx.title}:`, err.message);
+      }
+      done.set(p, text);
+      fs.appendFileSync(doneFile, JSON.stringify({ p, text }) + '\n');
+    }
+  } finally {
+    await task.destroy().catch(() => {});
+    await worker.terminate().catch(() => {});
+  }
+  const pages = [];
+  for (let p = 1; p <= idx.pages; p++) pages.push(String(done.get(p) || '').split('\n').map((l) => l.trim()).filter(Boolean));
+  const offset = detectOffset(pages);
+  const chunks = [];
+  pages.forEach((lines, i) => {
+    const text = lines.join('\n');
+    if (text.length < 40) return;
+    const printed = offset === null ? null : i + 1 - offset;
+    chunkPage(text).forEach((t, k) => chunks.push({ id: `${key}:${i + 1}:${k}`, book: key, page: i + 1, printed: printed >= 1 ? printed : null, text: t }));
+  });
+  const index = { ...idx, offset, textPages: pages.filter((l) => l.join('').length >= 40).length, chunks, ocr: true };
+  fs.writeFileSync(indexFile(key), JSON.stringify(index));
+  fs.rmSync(doneFile, { force: true });
+  // Its game system was guessed from no text; guess again now that there is some.
+  try { const s = readSystems(); delete s.guess[key]; writeSystems(s); } catch { /* fine */ }
+  console.log(`[library] text recognition done for "${idx.title}": ${chunks.length} passages from ${index.textPages} pages in ${Math.round((Date.now() - t0) / 60000)} min`);
+  return index;
+}
+
+// Tidies OCR output: joins words split across lines ("charac-\nter"), drops lines of stray symbols.
+function cleanOcr(text) {
+  return text.replace(/(\w)-\n(\w)/g, '$1$2')
+    .split('\n').map((l) => l.replace(/\s+/g, ' ').trim())
+    .filter((l) => l && (l.match(/[a-z0-9]/gi) || []).length >= Math.min(3, l.length * 0.5))
+    .join('\n');
+}
+
 // Indexes new/changed PDFs and forgets removed ones. Safe to call often.
 let syncing = null;
 export function syncLibrary() {
@@ -376,13 +463,22 @@ async function doSync() {
     keep.add(`${key}.json`);
     if (!fs.existsSync(indexFile(key))) todo.push(f);
   }
-  for (const name of fs.readdirSync(INDEX_DIR)) if (name.endsWith('.json') && !keep.has(name)) fs.rmSync(path.join(INDEX_DIR, name));
+  for (const name of fs.readdirSync(INDEX_DIR)) {
+    if (name.endsWith('.json') && !keep.has(name)) fs.rmSync(path.join(INDEX_DIR, name));
+    if (name.endsWith('.ocr') && !keep.has(name.replace(/\.ocr$/, '.json'))) fs.rmSync(path.join(INDEX_DIR, name));
+  }
   for (let i = 0; i < todo.length; i++) {
     progress.active = { queue: todo.length - i, file: path.basename(todo[i]), title: niceTitle(todo[i]), page: 0, pages: 0 };
     try { await indexBook(todo[i]); }
     catch (err) { console.error(`[library] couldn't read ${path.basename(todo[i])}:`, err.message); }
   }
   searchCache = null;
+  // Scanned books (pages that are only pictures): read the pictures with OCR, after every other book is done.
+  const scans = files.map((f) => ({ f, idx: readIndex(bookKey(f, fs.statSync(f))) })).filter(({ idx }) => idx && needsOcr(idx));
+  for (let i = 0; i < scans.length; i++) {
+    try { await ocrBook(scans[i].f, scans[i].idx, scans.length - i); searchCache = null; }
+    catch (err) { console.error(`[library] text recognition failed on ${path.basename(scans[i].f)}:`, err.message); }
+  }
 }
 
 // ---------- search ----------
@@ -497,5 +593,6 @@ export function removeBook(key) {
   fs.rmSync(path.join(LIB_DIR, book.file), { force: true });
   fs.rmSync(indexFile(key), { force: true });
   fs.rmSync(path.join(INDEX_DIR, `cover-${key}.png`), { force: true });
+  fs.rmSync(path.join(INDEX_DIR, `${key}.ocr`), { force: true });
   searchCache = null;
 }

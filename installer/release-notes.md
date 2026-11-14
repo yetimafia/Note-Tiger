@@ -1,9 +1,5 @@
-**New in 2.10.0: D&D character sheets** (part 1)
-- 🧙 `/sheet import`: attach your character sheet (PDF from D&D Beyond, the official fillable sheet, or your group's own) and Note Tiger reads it in.
-- `/sheet show`, `/sheet ask "what's my stealth bonus?"`, `/sheet list`, `/sheet remove`.
-- `/sheet pdf`: get your character back filled in on any blank sheet you've added (Library → Character sheets). Note Tiger works out each box once; use Test fill / Fix boxes to check.
-- Campaign → Characters: see, edit, import and download every character.
-- Recaps now know the party (names, classes, who plays whom).
-- `/help` lists the new commands.
+**New in 2.10.1: scanned rulebooks work now**
+- 📷 Some PDFs are just pictures of pages, with no text behind them, so `/game ask` couldn't search them. Note Tiger now reads those pictures with free text recognition that runs on your PC. It takes a few seconds a page (roughly 10 to 20 minutes per book, once) and runs after your other books. The Library tab shows its progress, and it picks up where it left off after a restart.
+- Books you already added are handled automatically.
 
-Coming next: sheets that update themselves after each session, and a character builder.
+Your settings, sessions and rulebooks are kept when you update.
