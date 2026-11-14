@@ -144,6 +144,7 @@ export function startWeb(ctx, port) {
         const gid = parts[2];
         if (!parts[3] && req.method === 'GET') return send(res, 200, ctx.characters(gid));
         if (!parts[3] && req.method === 'POST') return send(res, 200, ctx.saveCharacter(gid, await readBody(req)));
+        if (parts[3] && parts[4] === 'track' && req.method === 'POST') return send(res, 200, ctx.trackCharacter(gid, parts[3], await readBody(req)));
         if (parts[3] && parts[4] === 'delete' && req.method === 'POST') return send(res, 200, { ok: ctx.deleteCharacter(gid, parts[3]) });
         if (parts[3] && parts[4] === 'pdf' && req.method === 'GET') {
           const { pdf, fileName } = await ctx.characterPdf(gid, parts[3], url.searchParams.get('sheet') || '');

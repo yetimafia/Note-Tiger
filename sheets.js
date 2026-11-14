@@ -103,6 +103,15 @@ export function normalize(c) {
   out.personality = Object.fromEntries(['traits', 'ideals', 'bonds', 'flaws'].map((k) => [k, str(out.personality?.[k])]));
   for (const k of ['player', 'playerId', 'edition', 'species', 'size', 'background', 'alignment', 'speed', 'hitDice', 'proficiencies', 'languages', 'appearance', 'backstory', 'notes']) out[k] = str(out[k]);
   out.inspiration = Boolean(out.inspiration);
+  // At-the-table state (Party tracker): death saves, conditions, exhaustion, spent hit dice, concentration.
+  const t = out.tracker || {};
+  out.tracker = {
+    deathSaves: { s: Math.max(0, Math.min(3, num(t.deathSaves?.s) || 0)), f: Math.max(0, Math.min(3, num(t.deathSaves?.f) || 0)) },
+    conditions: Array.isArray(t.conditions) ? [...new Set(t.conditions.map(str).filter(Boolean))] : [],
+    exhaustion: Math.max(0, Math.min(6, num(t.exhaustion) || 0)),
+    hitDiceUsed: Math.max(0, num(t.hitDiceUsed) || 0),
+    concentration: str(t.concentration),
+  };
   return out;
 }
 
@@ -382,6 +391,91 @@ export function characterHistory(gid, id, limit = 30) {
     return fs.readFileSync(path.join(charDir(gid), 'history.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l))
       .filter((h) => !id || h.id === safeId(id)).slice(-limit).reverse();
   } catch { return []; }
+}
+
+// ---------- the Party tracker: HP, slots, hit dice, rests ----------
+export const CONDITIONS = ['Blinded', 'Charmed', 'Deafened', 'Frightened', 'Grappled', 'Incapacitated', 'Invisible', 'Paralyzed',
+  'Petrified', 'Poisoned', 'Prone', 'Restrained', 'Stunned', 'Unconscious'];
+export function hitDieOf(c) {
+  const m = String(c.hitDice || '').match(/(\d+)\s*d\s*(\d+)/i);
+  return m ? { total: Number(m[1]), die: Number(m[2]) } : { total: totalLevel(c), die: 8 };
+}
+
+// One change from the tracker. Returns { character, said } (said = a short line for the history and the screen).
+export function trackChange(c0, op, a = {}) {
+  const c = normalize(c0);
+  const t = c.tracker;
+  const n = Math.max(0, Math.round(Number(a.amount) || 0));
+  const hpMax = c.hp.max ?? 0;
+  let hp = c.hp.current ?? hpMax;
+  let said = '';
+  if (op === 'damage' && n) {
+    let left = n;
+    const fromTemp = Math.min(c.hp.temp || 0, left);
+    c.hp.temp = (c.hp.temp || 0) - fromTemp; left -= fromTemp;
+    if (hp === 0 && left) t.deathSaves.f = Math.min(3, t.deathSaves.f + 1); // hit while down: a failed death save
+    hp = Math.max(0, hp - left);
+    said = `took ${n} damage${fromTemp ? ` (${fromTemp} from temp HP)` : ''}`;
+    if (hp === 0) { said += ', down to 0 HP'; if (!t.conditions.includes('Unconscious')) t.conditions.push('Unconscious'); }
+    if (t.concentration && left) said += ` (concentration check DC ${Math.max(10, Math.floor(n / 2))})`;
+  } else if (op === 'heal' && n) {
+    if (hp === 0) { t.deathSaves = { s: 0, f: 0 }; t.conditions = t.conditions.filter((x) => x !== 'Unconscious'); }
+    hp = Math.min(hpMax || hp + n, hp + n);
+    said = `healed ${n}`;
+  } else if (op === 'temp') {
+    c.hp.temp = n; said = n ? `has ${n} temp HP` : 'lost temp HP';
+  } else if (op === 'setHp') {
+    hp = Math.max(0, Math.min(hpMax || n, n)); said = `HP set to ${hp}`;
+  } else if (op === 'slot') {
+    const l = String(a.level);
+    const slot = c.spellcasting.slots[l];
+    if (slot) { slot.used = Math.max(0, Math.min(slot.max, Number(a.used) || 0)); said = `level ${l} slots: ${slot.max - slot.used} of ${slot.max} left`; }
+  } else if (op === 'hitDie') {
+    const hd = hitDieOf(c);
+    if (t.hitDiceUsed < hd.total) {
+      const roll = 1 + Math.floor(Math.random() * hd.die);
+      const heal = Math.max(1, roll + mod(c.abilities.con));
+      t.hitDiceUsed++;
+      hp = Math.min(hpMax || hp + heal, hp + heal);
+      said = `spent a hit die: rolled ${roll}${signed(mod(c.abilities.con))}, healed ${heal}`;
+    }
+  } else if (op === 'setHitDice') {
+    t.hitDiceUsed = Math.max(0, Math.min(hitDieOf(c).total, Number(a.used) || 0)); said = `hit dice used: ${t.hitDiceUsed}`;
+  } else if (op === 'death') {
+    t.deathSaves = { s: Math.max(0, Math.min(3, Number(a.s) || 0)), f: Math.max(0, Math.min(3, Number(a.f) || 0)) };
+    said = t.deathSaves.s >= 3 ? 'is stable' : t.deathSaves.f >= 3 ? 'failed three death saves' : `death saves ${t.deathSaves.s}✓ ${t.deathSaves.f}✗`;
+  } else if (op === 'condition') {
+    const name = str(a.name);
+    if (t.conditions.includes(name)) { t.conditions = t.conditions.filter((x) => x !== name); said = `no longer ${name.toLowerCase()}`; }
+    else if (name) { t.conditions.push(name); said = `is ${name.toLowerCase()}`; }
+  } else if (op === 'exhaustion') {
+    t.exhaustion = Math.max(0, Math.min(6, Number(a.level) || 0)); said = `exhaustion ${t.exhaustion}`;
+  } else if (op === 'inspiration') {
+    c.inspiration = !c.inspiration; said = c.inspiration ? 'has inspiration' : 'used inspiration';
+  } else if (op === 'concentration') {
+    t.concentration = str(a.spell); said = t.concentration ? `concentrating on ${t.concentration}` : 'stopped concentrating';
+  } else if (op === 'money') {
+    for (const k of ['cp', 'sp', 'ep', 'gp', 'pp']) if (a[k] != null) c.money[k] = Math.max(0, Math.round(Number(a[k]) || 0));
+    said = `coins now ${['pp', 'gp', 'ep', 'sp', 'cp'].filter((k) => c.money[k]).map((k) => `${c.money[k]} ${k}`).join(', ') || 'none'}`;
+  } else if (op === 'shortRest') {
+    // Pact Magic slots come back on a short rest.
+    if (c.classes.some((k) => /warlock/i.test(k.name))) for (const sl of Object.values(c.spellcasting.slots)) sl.used = 0;
+    said = 'took a short rest';
+  } else if (op === 'longRest') {
+    hp = hpMax || hp; c.hp.temp = 0;
+    for (const sl of Object.values(c.spellcasting.slots)) sl.used = 0;
+    const hd = hitDieOf(c);
+    // 2014: get back half your hit dice; 2024: all of them.
+    t.hitDiceUsed = c.edition === '2024' ? 0 : Math.max(0, t.hitDiceUsed - Math.max(1, Math.floor(hd.total / 2)));
+    t.deathSaves = { s: 0, f: 0 }; t.concentration = '';
+    t.exhaustion = Math.max(0, t.exhaustion - 1);
+    t.conditions = t.conditions.filter((x) => x !== 'Unconscious');
+    said = 'took a long rest';
+  } else {
+    throw new Error('Unknown change.');
+  }
+  c.hp.current = hp;
+  return { character: c, said };
 }
 
 // ---------- reading PDFs ----------

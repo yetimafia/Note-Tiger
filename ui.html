@@ -233,6 +233,38 @@
   .mapgrid td, .mapgrid th { padding: 4px 8px; border-bottom: 1px solid var(--line); text-align: left; }
   .mapgrid th { position: sticky; top: 0; background: var(--panel); }
   .mapgrid input { padding: 3px 6px; font-size: 12px; margin: 0; }
+
+  /* ---------- Party tracker ---------- */
+  #partyList { display: grid; grid-template-columns: repeat(auto-fill, minmax(420px, 1fr)); gap: 16px; }
+  .pc { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 16px 18px; }
+  .pc.down { border-color: var(--red); box-shadow: 0 0 0 1px var(--red) inset; }
+  .pc .top { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; }
+  .pc h2 { margin: 0; font-size: 20px; } .pc .who { color: var(--dim); font-size: 13px; margin-top: 2px; }
+  .pc .top > div:first-child { min-width: 0; }
+  .pc .badges { display: flex; gap: 5px; flex-wrap: nowrap; justify-content: flex-end; flex-shrink: 0; }
+  .pc .badge { background: var(--panel2); border: 1px solid var(--line); border-radius: 10px; padding: 4px 7px; font-size: 11px; text-align: center; min-width: 40px; }
+  .pc .badge b { display: block; font-size: 17px; color: var(--text); }
+  .pc .insp { cursor: pointer; } .pc .insp.on { border-color: var(--accent); color: var(--accent); }
+  .hpbox { margin: 14px 0 10px; }
+  .hpnums { display: flex; align-items: baseline; gap: 8px; } .hpnums .cur { font-size: 34px; font-weight: 800; } .hpnums .max { color: var(--dim); font-size: 18px; }
+  .hpnums .tmp { background: #1d3550; color: #8cc8ff; border-radius: 8px; padding: 2px 8px; font-size: 13px; font-weight: 700; }
+  .hpbar { height: 10px; background: var(--panel2); border-radius: 6px; overflow: hidden; margin: 6px 0 10px; border: 1px solid var(--line); }
+  .hpbar i { display: block; height: 100%; transition: width .25s, background .25s; }
+  .hpctl { display: flex; gap: 6px; } .hpctl input { width: 80px; margin: 0; text-align: center; font-size: 16px; }
+  .hpctl .dmg { background: #5a1a22; border-color: #8a2a35; color: #ffd0d5; } .hpctl .heal { background: #173d27; border-color: #2a6b44; color: #c8f5d8; }
+  .prow { display: flex; align-items: center; gap: 10px; margin: 8px 0; font-size: 13px; flex-wrap: wrap; }
+  .prow .lbl { color: var(--dim); min-width: 74px; }
+  .pips { display: flex; gap: 4px; flex-wrap: wrap; }
+  .pip { width: 16px; height: 16px; border-radius: 50%; border: 2px solid var(--accent); background: var(--accent); cursor: pointer; padding: 0; }
+  .pip.off { background: transparent; opacity: .55; }
+  .pip.hd { border-radius: 4px; border-color: #7fb0ff; background: #7fb0ff; } .pip.hd.off { background: transparent; }
+  .pip.ok { border-color: #4ade80; background: transparent; } .pip.ok.on { background: #4ade80; }
+  .pip.bad { border-color: var(--red); background: transparent; } .pip.bad.on { background: var(--red); }
+  .chips { display: flex; gap: 5px; flex-wrap: wrap; } .chip { background: #3a2c0c; color: var(--accent); border-radius: 999px; padding: 2px 9px; font-size: 12px; cursor: pointer; }
+  .chip.conc { background: #23194a; color: #c4b5fd; }
+  .pc select.small, .pc input.small { width: auto; padding: 3px 6px; font-size: 12px; margin: 0; }
+  .coins { display: flex; gap: 6px; } .coins label { font-size: 11px; color: var(--dim); text-align: center; } .coins input { width: 58px; margin: 0; padding: 3px 5px; text-align: center; }
+  .pc .rest { display: flex; gap: 6px; margin-top: 12px; } .pc .said { color: var(--dim); font-size: 12px; margin-top: 8px; min-height: 15px; }
   .tag.tt { background: var(--bg); color: var(--dim); border: 1px solid var(--line); }
   .tview.hide-tt .tblock.tt { display: none; }
   .timeline { border-left: 2px solid var(--line); margin-left: 56px; }
@@ -259,6 +291,7 @@
     <button data-tab="home" class="active">Dashboard</button>
     <button data-tab="sessions">Sessions</button>
     <button data-tab="campaign">Campaign</button>
+    <button data-tab="party">Party</button>
     <button data-tab="ask">Ask</button>
     <button data-tab="library">Library</button>
     <button data-tab="settings">Settings</button>
@@ -380,6 +413,15 @@
   </section>
 
   <!-- ASK -->
+  <section id="tab-party" hidden>
+    <div class="row" style="justify-content:space-between;flex-wrap:wrap;gap:10px">
+      <div><h1>🎲 Party tracker</h1><p class="sub">Hit points, spell slots, hit dice, conditions and rests during the game. Changes save to each character's sheet right away.</p></div>
+      <div class="row" style="gap:8px"><button class="btn ghost" id="partyShort">☕ Short rest (everyone)</button><button class="btn ghost" id="partyLong">🌙 Long rest (everyone)</button>
+        <select id="partyGuild" style="width:auto;min-width:200px"></select></div>
+    </div>
+    <div id="partyList" style="margin-top:16px"><div class="empty">Loading…</div></div>
+  </section>
+
   <section id="tab-ask" hidden>
     <h1>Ask the archive</h1>
     <p class="sub">Questions are answered from your recorded sessions only.</p>
@@ -678,6 +720,7 @@ function showTab(name) {
   if (name === 'settings') loadSettings();
   if (name === 'library') { loadLibrary(); loadSheets(); }
   if (name === 'campaign') { loadCampaign(); loadCharacters(); }
+  if (name === 'party') loadParty();
   location.hash = name;
 }
 
@@ -805,13 +848,14 @@ function renderHome() {
 }
 
 function fillGuildSelects() {
-  for (const id of ['#sessGuild', '#askGuild', '#campGuild']) {
+  for (const id of ['#sessGuild', '#askGuild', '#campGuild', '#partyGuild']) {
     const sel = $(id), prev = sel.value;
     const opts = status.guilds.map((g) => `<option value="${g.id}">${esc(g.name)}</option>`).join('');
     if (sel.dataset.opts !== opts) {
       sel.innerHTML = opts || '<option value="">No servers</option>'; sel.dataset.opts = opts;
       if (id === '#sessGuild' && !$('#tab-sessions').hidden) loadSessions();
       if (id === '#campGuild' && !$('#tab-campaign').hidden) { loadCampaign(); loadCharacters(); }
+      if (id === '#partyGuild' && !$('#tab-party').hidden) loadParty();
     }
     if (prev && [...sel.options].some((o) => o.value === prev)) sel.value = prev;
   }
@@ -1863,6 +1907,118 @@ async function uploadSheets(files) {
 $('#sheetAddBtn').onclick = () => $('#sheetFile').click();
 $('#sheetFile').onchange = (e) => { uploadSheets([...e.target.files]); e.target.value = ''; };
 
+
+// ---------- Party tracker ----------
+let party = null, partySaid = {}, partyTimer = null;
+// (amod, the ability modifier helper, is shared with the Characters card)
+async function loadParty() {
+  clearTimeout(partyTimer);
+  const gid = $('#partyGuild').value;
+  if (!gid) { $('#partyList').innerHTML = '<div class="empty">Invite the bot to a server first.</div>'; return; }
+  try { party = await api(`/api/characters/${gid}`); } catch (e) { $('#partyList').innerHTML = `<div class="empty">${esc(e.message)}</div>`; return; }
+  // Don't redraw under someone typing a number.
+  if (!$('#partyList').contains(document.activeElement) || document.activeElement.tagName === 'BUTTON') drawParty();
+  if (!$('#tab-party').hidden) partyTimer = setTimeout(loadParty, 5000);
+}
+function drawParty() {
+  const list = party.characters;
+  if (!list.length) { $('#partyList').innerHTML = '<div class="empty">No characters yet. Players can add theirs with <code>/sheet import</code> or <code>/sheet build</code>.</div>'; return; }
+  $('#partyList').innerHTML = list.map((c) => {
+    const t = c.tracker || { deathSaves: { s: 0, f: 0 }, conditions: [], exhaustion: 0, hitDiceUsed: 0, concentration: '' };
+    const max = c.hp?.max ?? 0, cur = c.hp?.current ?? max, tmp = c.hp?.temp || 0;
+    const pct = max ? Math.max(0, Math.min(100, (cur / max) * 100)) : 0;
+    const col = pct > 50 ? '#4ade80' : pct > 25 ? '#f5a524' : '#ef4444';
+    const cls = (c.classes || []).map((k) => `${k.name}${k.subclass ? ` (${k.subclass})` : ''} ${k.level}`).join(' / ');
+    const pb = 2 + Math.floor(((c.classes || []).reduce((n, k) => n + k.level, 0) - 1) / 4);
+    const pp = 10 + amod(c.abilities?.wis) + (c.skills?.perception?.prof ? pb * (c.skills.perception.expertise ? 2 : 1) : 0);
+    const init = c.initiative ?? amod(c.abilities?.dex);
+    const hd = (String(c.hitDice || '').match(/(\d+)\s*d\s*(\d+)/i) || [0, (c.classes || []).reduce((n, k) => n + k.level, 0) || 1, 8]);
+    const hdTotal = Number(hd[1]), hdDie = Number(hd[2]), hdLeft = Math.max(0, hdTotal - (t.hitDiceUsed || 0));
+    const slots = Object.entries(c.spellcasting?.slots || {}).filter(([, v]) => v.max);
+    const pips = (n, on, cls2, data) => Array.from({ length: n }, (_, i) => `<button class="pip ${cls2} ${i < on ? 'on' : 'off'}" data-${data}="${i}"></button>`).join('');
+    return `<div class="pc${cur === 0 ? ' down' : ''}" data-id="${esc(c.id)}">
+      <div class="top"><div><h2>${esc(c.name)}</h2><div class="who">${esc([c.species, cls].filter(Boolean).join(' · '))}${c.player ? ` · ${esc(c.player)}` : ''}</div></div>
+        <div class="badges"><div class="badge">AC<b>${c.ac ?? '?'}</b></div><div class="badge">Init<b>${init >= 0 ? '+' : ''}${init}</b></div>
+          <div class="badge">Speed<b>${esc(String(c.speed || '?').replace(/\s*ft\.?/, ''))}</b></div><div class="badge" title="Passive Perception">PP<b>${pp}</b></div>
+          <div class="badge insp${c.inspiration ? ' on' : ''}" data-act="inspiration" title="Inspiration (click to toggle)">Insp<b>${c.inspiration ? '★' : '☆'}</b></div></div></div>
+      <div class="hpbox">
+        <div class="hpnums"><span class="cur">${cur}</span><span class="max">/ ${max} HP</span>${tmp ? `<span class="tmp">+${tmp} temp</span>` : ''}</div>
+        <div class="hpbar"><i style="width:${pct}%;background:${col}"></i></div>
+        <div class="hpctl"><input type="number" min="0" class="amt" placeholder="0"><button class="btn dmg" data-act="damage">Damage</button>
+          <button class="btn heal" data-act="heal">Heal</button><button class="btn ghost" data-act="temp">Temp HP</button></div>
+      </div>
+      ${cur === 0 ? `<div class="prow"><span class="lbl">Death saves</span><span class="pips">${pips(3, t.deathSaves.s, 'ok', 'ds')}</span><span class="pips">${pips(3, t.deathSaves.f, 'bad', 'df')}</span></div>` : ''}
+      ${slots.length ? `<div class="prow"><span class="lbl">Spell slots</span><div style="display:flex;gap:14px;flex-wrap:wrap">${slots.map(([l, v]) =>
+        `<span title="Level ${l}: click a lit pip to spend a slot, a dim one to get it back">L${l} <span class="pips" style="display:inline-flex">${pips(v.max, v.max - (v.used || 0), '', `slot-${l}`)}</span></span>`).join('')}</div></div>` : ''}
+      <div class="prow"><span class="lbl">Hit dice</span><span class="pips">${pips(hdTotal, hdLeft, 'hd', 'hd')}</span><span class="hint">${hdLeft}/${hdTotal} d${hdDie}</span>
+        <button class="btn ghost" data-act="hitDie" ${hdLeft ? '' : 'disabled'} style="padding:3px 9px;font-size:12px">Spend &amp; roll</button></div>
+      <div class="prow"><span class="lbl">Conditions</span><span class="chips">${t.conditions.map((x) => `<span class="chip" data-cond="${esc(x)}" title="Click to remove">${esc(x)} ✕</span>`).join('')}
+        ${t.concentration ? `<span class="chip conc" data-act="unconc" title="Click to stop concentrating">🧠 ${esc(t.concentration)} ✕</span>` : ''}</span>
+        <select class="small addcond"><option value="">+ condition</option>${party.conditions.filter((x) => !t.conditions.includes(x)).map((x) => `<option>${x}</option>`).join('')}</select>
+        <select class="small exh" title="Exhaustion">${[0, 1, 2, 3, 4, 5, 6].map((n) => `<option value="${n}"${n === t.exhaustion ? ' selected' : ''}>${n ? `Exhaustion ${n}` : 'No exhaustion'}</option>`).join('')}</select>
+        ${(c.spellcasting?.spells || []).length && !t.concentration ? `<select class="small conc"><option value="">🧠 concentrating on…</option>${(c.spellcasting.spells || []).filter((x) => x.level > 0).map((x) => `<option>${esc(x.name)}</option>`).join('')}</select>` : ''}</div>
+      <div class="prow"><span class="lbl">Coins</span><div class="coins">${['pp', 'gp', 'ep', 'sp', 'cp'].map((k) => `<label>${k.toUpperCase()}<input type="number" min="0" data-coin="${k}" value="${c.money?.[k] || 0}"></label>`).join('')}</div></div>
+      <div class="rest"><button class="btn ghost" data-act="shortRest">☕ Short rest</button><button class="btn ghost" data-act="longRest">🌙 Long rest</button></div>
+      <div class="said">${esc(partySaid[c.id] || '')}</div>
+    </div>`;
+  }).join('');
+  document.querySelectorAll('#partyList .pc').forEach(wirePc);
+}
+async function track(id, body) {
+  try {
+    const out = await api(`/api/characters/${$('#partyGuild').value}/${encodeURIComponent(id)}/track`, { method: 'POST', body });
+    const i = party.characters.findIndex((c) => c.id === id);
+    if (i >= 0) party.characters[i] = { ...out.character, id };
+    partySaid[id] = out.said ? `${out.character.name} ${out.said}` : '';
+    drawParty();
+  } catch (e) { toast(e.message); }
+}
+function wirePc(el) {
+  const id = el.dataset.id;
+  const c = party.characters.find((x) => x.id === id);
+  const amt = () => Number(el.querySelector('.amt').value) || 0;
+  el.querySelectorAll('[data-act]').forEach((b) => b.addEventListener('click', () => {
+    const act = b.dataset.act;
+    if (['damage', 'heal', 'temp'].includes(act)) { if (!amt() && act !== 'temp') return el.querySelector('.amt').focus(); return track(id, { op: act, amount: amt() }); }
+    if (act === 'unconc') return track(id, { op: 'concentration', spell: '' });
+    if (act === 'longRest' && !confirm(`${c.name} takes a long rest? (Full HP, all slots back${c.edition === '2024' ? ', all hit dice back' : ', half the hit dice back'}.)`)) return;
+    track(id, { op: act });
+  }));
+  el.querySelector('.amt').addEventListener('keydown', (e) => { if (e.key === 'Enter') track(id, { op: e.shiftKey ? 'heal' : 'damage', amount: amt() }); });
+  el.querySelectorAll('[data-ds],[data-df]').forEach((p) => p.addEventListener('click', () => {
+    const t = c.tracker; const isS = 'ds' in p.dataset; const i = Number(isS ? p.dataset.ds : p.dataset.df) + 1;
+    const cur = isS ? t.deathSaves.s : t.deathSaves.f; const next = cur >= i ? i - 1 : i;
+    track(id, { op: 'death', s: isS ? next : t.deathSaves.s, f: isS ? t.deathSaves.f : next });
+  }));
+  el.querySelectorAll('.pip:not(.hd):not(.ok):not(.bad)').forEach((p) => p.addEventListener('click', () => {
+    const k = Object.keys(p.dataset).find((x) => x.startsWith('slot'));
+    const l = k.replace(/^slot-?/, '').replace(/\D/g, '');
+    const v = c.spellcasting.slots[l]; const lit = !p.classList.contains('off');
+    track(id, { op: 'slot', level: l, used: (v.used || 0) + (lit ? 1 : -1) });
+  }));
+  el.querySelectorAll('.pip.hd').forEach((p) => p.addEventListener('click', () => {
+    const lit = !p.classList.contains('off');
+    track(id, { op: 'setHitDice', used: (c.tracker.hitDiceUsed || 0) + (lit ? 1 : -1) });
+  }));
+  el.querySelectorAll('[data-cond]').forEach((ch) => ch.addEventListener('click', () => track(id, { op: 'condition', name: ch.dataset.cond })));
+  el.querySelector('.addcond').addEventListener('change', (e) => e.target.value && track(id, { op: 'condition', name: e.target.value }));
+  el.querySelector('.exh').addEventListener('change', (e) => track(id, { op: 'exhaustion', level: Number(e.target.value) }));
+  el.querySelector('.conc')?.addEventListener('change', (e) => e.target.value && track(id, { op: 'concentration', spell: e.target.value }));
+  el.querySelectorAll('[data-coin]').forEach((i) => i.addEventListener('change', () => track(id, { op: 'money', [i.dataset.coin]: Number(i.value) || 0 })));
+}
+async function partyRest(op) {
+  if (!party?.characters.length) return;
+  if (op === 'longRest' && !confirm('Everyone takes a long rest?')) return;
+  for (const c of party.characters) {
+    const out = await api(`/api/characters/${$('#partyGuild').value}/${encodeURIComponent(c.id)}/track`, { method: 'POST', body: { op } }).catch((e) => { toast(e.message); return null; });
+    if (out) partySaid[c.id] = `${out.character.name} ${out.said}`;
+  }
+  loadParty();
+}
+$('#partyShort').onclick = () => partyRest('shortRest');
+$('#partyLong').onclick = () => partyRest('longRest');
+$('#partyGuild').addEventListener('change', () => { partySaid = {}; loadParty(); });
+
 let loadedSettings = null;
 async function loadSettings() {
   const s = loadedSettings = await api('/api/settings');
@@ -1965,7 +2121,7 @@ $('#saveBtn').addEventListener('click', async () => {
 });
 
 // ---------- start ----------
-showTab(['sessions', 'campaign', 'ask', 'library', 'settings'].includes(location.hash.slice(1)) ? location.hash.slice(1) : 'home');
+showTab(['sessions', 'campaign', 'party', 'ask', 'library', 'settings'].includes(location.hash.slice(1)) ? location.hash.slice(1) : 'home');
 refreshStatus().then(() => { if (status && !status.hasToken) showTab('settings'); });
 setInterval(refreshStatus, 5000);
 </script>

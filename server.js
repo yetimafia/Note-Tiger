@@ -18,7 +18,7 @@ import { recapSession, askArchive, ollamaStatus, refreshOllama, AI_LABEL, getPro
 import { councilStatus, checkMember, parseMembers, machineOf } from './council.js';
 import {
   listCharacters, getCharacter, saveCharacter, deleteCharacter, importSheet, fillSheet, listTemplates, addTemplate, removeTemplate,
-  mapTemplate, readTemplateMap, saveTemplateMap, characterHistory, KEY_GUIDE, ALL_KEYS, normalize,
+  mapTemplate, readTemplateMap, saveTemplateMap, characterHistory, KEY_GUIDE, ALL_KEYS, normalize, trackChange, CONDITIONS,
 } from './sheets.js';
 
 // Matching a blank sheet's boxes runs in the background (it can take a few minutes on the local AI).
@@ -160,9 +160,17 @@ function guildList() {
 startWeb({
   councilStatus() { return refreshCouncil(); },
   // ---------- characters (D&D sheets) ----------
-  characters(gid) { return { characters: listCharacters(gid), history: characterHistory(gid), sheets: listTemplates().filter((t) => t.mapped).map((t) => t.name) }; },
+  characters(gid) { return { characters: listCharacters(gid), conditions: CONDITIONS, history: characterHistory(gid), sheets: listTemplates().filter((t) => t.mapped).map((t) => t.name) }; },
   saveCharacter(gid, body) { return saveCharacter(gid, body, { by: 'Note Tiger app', change: body.change || 'edited in the app' }); },
   deleteCharacter(gid, id) { return deleteCharacter(gid, id, { by: 'Note Tiger app' }); },
+  // Party tracker: one change (damage, heal, slot, rest…) to one character.
+  trackCharacter(gid, id, body) {
+    const c = getCharacter(gid, id);
+    if (!c) throw new Error('No such character.');
+    const { character, said } = trackChange(c, body.op, body);
+    const saved = saveCharacter(gid, { ...character, id }, { by: 'Party tracker', change: said || body.op });
+    return { character: saved, said, conditions: CONDITIONS };
+  },
   async importCharacter(gid, buf, fileName) {
     const { character, how } = await importSheet(buf, askAI, { log: (m) => console.log(m) });
     const existing = listCharacters(gid).find((c) => c.name.toLowerCase() === character.name.toLowerCase());
