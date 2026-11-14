@@ -1,6 +1,6 @@
-**New in 2.12.0: Party tracker**
-- 🎲 A new **Party** tab for game night, with a card for each character: HP with Damage / Heal / Temp HP (temp HP soaks damage first), clickable spell-slot and hit-dice pips, "Spend & roll" a hit die, death saves when someone drops, conditions, exhaustion, concentration (with the DC to keep it when hit), inspiration and coins.
-- ☕ Short rest (Warlocks get their slots back) and 🌙 long rest (full HP, all slots, hit dice back by the 2014 or 2024 rules), for one character or everyone.
-- Everything saves to the character right away, so `/sheet show` and `/sheet pdf` stay up to date.
+**New in 2.12.1: feats and gear in /sheet build**
+- ⭐ **Feats step**: menus for every feat your character gets (ability increases taken as feats, Variant Human / 2024 Human, 2024 Epic Boons) and Fighting Style for Fighters, Paladins and Rangers. ✍️ adds a feat from another book. Defense, Archery, Alert and Tough are counted in your numbers.
+- 🎒 **Gear**: two ready-made starting kits per class, or 🛠 build your own (armor, shield, weapons). Then pick an equipment pack (contents listed), common adventuring gear, and ✍️ anything else plus your gold.
+- ✨ Spells from other books now have their own ✍️ button in the spell step. The last step is just name and personality.
 
 Your settings, sessions and rulebooks are kept when you update.

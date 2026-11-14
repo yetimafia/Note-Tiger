@@ -5,6 +5,7 @@ import {
 } from 'discord.js';
 import {
   CLASSES, SPECIES, BACKGROUNDS, ARMOR, WEAPONS, WEAPON_2024, ALL_SKILLS, ABILITY_LIST, spellSlots, asiLevels,
+  FEATS, FIGHTING_STYLE_AT, PACKS, ADVENTURING_GEAR, KITS,
 } from './rules5e.js';
 import { normalize, skillLabel, ABILITY_NAMES, signed, mod, profBonusFor, sheetSummary, srdSpells } from './sheets.js';
 
@@ -42,6 +43,21 @@ export function maxSpellLevel(s) {
   return slots.length ? Math.max(...slots) : 0;
 }
 const castsSpells = (s) => Boolean(CLASSES[s.cls]?.ability) && (maxSpellLevel(s) > 0 || (CLASSES[s.cls].cantrips || [0])[0] > 0);
+// Every feat this character picks: fighting style, species feat, ASIs taken as feats, a 2024 Epic Boon.
+export function featSlots(s) {
+  const out = [];
+  const ed = s.edition;
+  if (FIGHTING_STYLE_AT[s.cls] && s.level >= FIGHTING_STYLE_AT[s.cls]) out.push({ type: 'style', label: 'Fighting Style' });
+  const sp = speciesData(s);
+  for (let i = 0; i < (sp?.feats || 0); i++) out.push({ type: ed === '2024' ? 'origin' : 'general', label: ed === '2024' ? 'Human: Versatile (an origin feat)' : `${s.subspecies || s.species} feat` });
+  const lv = asiLevels(s.cls, ed).filter((l) => l <= s.level);
+  (s.asis || []).slice(0, lv.length).forEach((x, i) => { if (x?.kind === 'feat') out.push({ type: 'general', label: `Level ${lv[i]} feat` }); });
+  if (ed === '2024' && s.level >= 19) out.push({ type: 'epic', label: 'Level 19 Epic Boon' });
+  return out;
+}
+const featList = (s, type) => (FEATS[s.edition][type] || FEATS[s.edition].general);
+const kitText = (k) => [k.armor && k.armor !== 'none' ? k.armor : '', k.shield ? 'shield' : '',
+  ...k.weapons.map((w) => (k.qty?.[w] ? `${k.qty[w]} ${w.toLowerCase()}s` : w.toLowerCase())), ...(k.items || []).map((x) => x.toLowerCase()), k.pack].filter(Boolean).join(', ');
 const spellDesc = (x) => [x.t, x.r, x.v.split('').join(', '), x.co && 'Concentration', x.ri && 'Ritual'].filter(Boolean).join(' · ');
 
 export function finalScores(s) {
@@ -79,8 +95,13 @@ export function buildCharacter(s) {
   const pb = profBonusFor(lvl);
 
   // Feats: background (2024), species, and any ASIs taken as feats; names typed by the player fill them in.
-  const typedFeats = String(s.feats || '').split(/[,\n]/).map((x) => x.trim()).filter(Boolean);
-  const tough = typedFeats.some((f) => /^tough$/i.test(f)) || (ed === '2024' && bg.feat === 'Tough');
+  const slots = featSlots(s);
+  const pickedFeats = slots.map((sl, i) => ({ ...sl, name: (s.featPicks || [])[i] })).filter((x) => x.name);
+  const style = pickedFeats.find((x) => x.type === 'style')?.name || '';
+  const typedFeats = [...pickedFeats.filter((x) => x.type !== 'style').map((x) => x.name),
+    ...String(s.feats || '').split(/[,\n]/).map((x) => x.trim()).filter(Boolean)];
+  const hasFeat = (n) => typedFeats.some((f) => f.toLowerCase() === n.toLowerCase()) || (ed === '2024' && bg.feat === n);
+  const tough = hasFeat('Tough');
 
   // HP: full hit die at level 1, then the average (rounded up) each level.
   const avg = c.hitDie / 2 + 1;
@@ -99,6 +120,7 @@ export function buildCharacter(s) {
   else if (c.unarmored === 'wis' && !s.shield) ac = 10 + m.dex + m.wis;
   else ac = 10 + m.dex;
   if (s.shield) ac += 2;
+  if (style === 'Defense' && armor) ac += 1;
 
   // Speed.
   let speed = sp?.speed || 30;
@@ -113,7 +135,7 @@ export function buildCharacter(s) {
     const ranged = props.includes('r');
     const monkWeapon = s.cls === 'Monk' && !ranged && ((group === 'simple' && !props.includes('2')) || (ed === '2014' ? name === 'Shortsword' : props.includes('l')));
     const abil = ranged ? 'dex' : (props.includes('f') || monkWeapon) ? (m.dex > m.str ? 'dex' : 'str') : 'str';
-    const bonus = m[abil] + (weaponProficient(s.cls, ed, name, group, props) ? pb : 0);
+    const bonus = m[abil] + (weaponProficient(s.cls, ed, name, group, props) ? pb : 0) + (ranged && style === 'Archery' ? 2 : 0);
     const vers = props.match(/v(\d+d\d+)/);
     const notes = [props.includes('f') && 'Finesse', props.includes('l') && 'Light', props.includes('t') && 'Thrown', props.includes('2') && 'Two-handed',
       vers && `Versatile (${vers[1]})`, ranged && 'Ranged'].filter(Boolean).join(', ');
@@ -152,7 +174,8 @@ export function buildCharacter(s) {
       }
       const label = c.sub[ed].label;
       let name = f;
-      if (f === 'Subclass feature') name = subName ? `${subName} feature` : `${label} feature`;
+      if (f === 'Fighting Style' && style) name = `Fighting Style: ${style}`;
+      else if (f === 'Subclass feature') name = subName ? `${subName} feature` : `${label} feature`;
       else if (f === label && subName) name = `${label}: ${subName}`;
       else if (f === 'Sneak Attack') name = `Sneak Attack (${Math.ceil(lvl / 2)}d6)`;
       features.push({ name, text: `${s.cls} ${l}` });
@@ -166,9 +189,13 @@ export function buildCharacter(s) {
   const langExtra = ed === '2024' ? 2 : (sp?.extraLanguages || 0) + (bg.languages || 0);
   const languages = [ed === '2024' ? 'Common' : sp?.languages, c.languages, langExtra ? `+${langExtra} of your choice` : ''].filter(Boolean).join(', ');
 
+  const qty = s.weaponQty || {};
   const inventory = [
     ...(s.armor && s.armor !== 'none' ? [{ name: s.armor, qty: 1 }] : []), ...(s.shield ? [{ name: 'Shield', qty: 1 }] : []),
-    ...(s.weapons || []).map((w) => ({ name: w, qty: 1 })),
+    ...(s.weapons || []).map((w) => ({ name: w, qty: qty[w] || 1 })),
+    ...(s.pack ? [{ name: s.pack, qty: 1, notes: PACKS[s.pack] }] : []),
+    ...(s.kitItems || []).map((x) => ({ name: x, qty: 1 })),
+    ...(s.items || []).map((x) => ({ name: x, qty: 1 })),
     ...String(s.gear || '').split(/[,\n]/).map((x) => x.trim()).filter(Boolean).map((x) => {
       const mm = x.match(/^(\d+)\s*[x×]?\s+(.+)$/i);
       return mm ? { name: mm[2], qty: Number(mm[1]) } : { name: x, qty: 1 };
@@ -182,8 +209,8 @@ export function buildCharacter(s) {
     species: s.subspecies && s.subspecies !== s.species && !/lineage|legacy/.test(s.subspecies) ? s.subspecies : [s.species, /lineage|legacy/.test(s.subspecies || '') ? `(${s.subspecies})` : ''].filter(Boolean).join(' '),
     background: s.background, alignment: s.alignment || '', xp: null,
     abilities: sc, saves: Object.fromEntries(c.saves.map((a) => [a, { prof: true }])), skills,
-    profBonus: pb, ac, speed: `${speed} ft`, hp: { max: hp, current: hp, temp: 0 }, hitDice: `${lvl}d${c.hitDie}`,
-    attacks, spellcasting, inventory, money: { gp: Number(s.gold) || 0 },
+    profBonus: pb, ac, speed: `${speed} ft`, initiative: hasFeat('Alert') ? m.dex + (ed === '2024' ? pb : 5) : null, hp: { max: hp, current: hp, temp: 0 }, hitDice: `${lvl}d${c.hitDie}`,
+    attacks, spellcasting, inventory, money: { gp: s.gold == null ? 10 : Number(s.gold) || 0 },
     features, proficiencies: profs, languages,
     personality: { traits: s.traits || '', ideals: s.ideals || '', bonds: s.bonds || '', flaws: s.flaws || '' },
     backstory: s.backstory || '', appearance: '', notes: `Made with /sheet build (${ed} rules)`,
@@ -234,7 +261,7 @@ function expertiseCount(s) {
 }
 const asiCount = (s) => asiLevels(s.cls, s.edition).filter((l) => l <= s.level).length;
 
-const STEPS = ['edition', 'class', 'species', 'background', 'method', 'assign', 'skills', 'expertise', 'asi', 'gear', 'spells', 'details', 'review'];
+const STEPS = ['edition', 'class', 'species', 'background', 'method', 'assign', 'skills', 'expertise', 'asi', 'feats', 'gear', 'gear2', 'spells', 'details', 'review'];
 function nextStep(s, from) {
   let i = STEPS.indexOf(from) + 1;
   while (i < STEPS.length) {
@@ -242,6 +269,7 @@ function nextStep(s, from) {
     if (st === 'expertise' && !expertiseCount(s)) { i++; continue; }
     if (st === 'asi' && !asiCount(s)) { i++; continue; }
     if (st === 'spells' && !castsSpells(s)) { i++; continue; }
+    if (st === 'feats' && !featSlots(s).length) { i++; continue; }
     return st;
   }
   return 'review';
@@ -364,17 +392,54 @@ function view(s) {
     const allSet = lv.every((_, idx) => (s.asis || [])[idx]);
     rows.push(more ? row(btn(id('asipage', String(page + 1)), 'More →', ButtonStyle.Primary), btn(id('cancel'), 'Cancel', ButtonStyle.Danger)) : nav(allSet));
   } else if (s.step === 'gear') {
-    text += '**Armor and weapons.** (The rest of your gear you can type in at the end.)';
-    rows.push(row(select(id('pick', 'armor'), s.armor ? s.armor : 'Armor', [{ label: 'No armor', value: 'none', description: c.unarmored ? 'Your class has Unarmored Defense' : undefined, default: s.armor === 'none' },
-      ...Object.entries(ARMOR).map(([k, v]) => ({ label: k, value: k, description: `${v.type}, AC ${v.ac}${v.type === 'light' ? ' + Dex' : v.type === 'medium' ? ' + Dex (max 2)' : ''}`, default: s.armor === k }))])));
-    rows.push(row(select(id('pick', 'shield'), s.shield ? 'Shield (+2 AC)' : 'Shield?', [{ label: 'No shield', value: 'no', default: s.shield === false }, { label: 'Shield (+2 AC)', value: 'yes', default: s.shield === true }])));
-    const wopts = (group) => Object.entries(WEAPONS[group]).map(([k, [d, t, p]]) => {
-      const [dd, tt] = (ed === '2024' && WEAPON_2024[k]) || [d, t];
-      return { label: k, value: k, description: `${dd} ${tt}${p.includes('f') ? ', finesse' : ''}${p.includes('r') ? ', ranged' : ''}${p.includes('2') ? ', two-handed' : ''}`, default: (s.weapons || []).includes(k) };
-    });
-    rows.push(row(select(id('weap', 'simple'), 'Simple weapons (up to 3)', wopts('simple'), { min: 0, max: 3 })));
-    rows.push(row(select(id('weap', 'martial'), 'Martial weapons (up to 3)', wopts('martial'), { min: 0, max: 3 })));
-    rows.push(nav(Boolean(s.armor) && s.shield !== undefined));
+    const kits = KITS[s.cls] || [];
+    if (s.kit !== 'custom') {
+      text += '🎒 **Starting gear.** Pick a ready-made kit, or build your own.';
+      const k = kits[Number(s.kit)];
+      if (k) text += `\n**${k.name}:** ${kitText(k)}`;
+      rows.push(row(select(id('kit'), k ? k.name : 'Starting kit', [...kits.map((x, i) => ({ label: `${s.cls}: ${x.name}`, value: String(i), description: kitText(x).slice(0, 100), default: s.kit === String(i) })),
+        { label: '🛠 Build my own', value: 'custom', description: 'Choose armor, shield and weapons yourself' }])));
+      rows.push(nav(Boolean(k)));
+    } else {
+      text += '🛠 **Build your own:** armor and weapons. (Packs and other gear come next.)';
+      rows.push(row(select(id('pick', 'armor'), s.armor ? s.armor : 'Armor', [{ label: 'No armor', value: 'none', description: c.unarmored ? 'Your class has Unarmored Defense' : undefined, default: s.armor === 'none' },
+        ...Object.entries(ARMOR).map(([k, v]) => ({ label: k, value: k, description: `${v.type}, AC ${v.ac}${v.type === 'light' ? ' + Dex' : v.type === 'medium' ? ' + Dex (max 2)' : ''}`, default: s.armor === k }))])));
+      rows.push(row(select(id('pick', 'shield'), s.shield ? 'Shield (+2 AC)' : 'Shield?', [{ label: 'No shield', value: 'no', default: s.shield === false }, { label: 'Shield (+2 AC)', value: 'yes', default: s.shield === true }])));
+      const wopts = (group) => Object.entries(WEAPONS[group]).map(([k, [d, t, p]]) => {
+        const [dd, tt] = (ed === '2024' && WEAPON_2024[k]) || [d, t];
+        return { label: k, value: k, description: `${dd} ${tt}${p.includes('f') ? ', finesse' : ''}${p.includes('r') ? ', ranged' : ''}${p.includes('2') ? ', two-handed' : ''}`, default: (s.weapons || []).includes(k) };
+      });
+      rows.push(row(select(id('weap', 'simple'), 'Simple weapons (up to 3)', wopts('simple'), { min: 0, max: 3 })));
+      rows.push(row(select(id('weap', 'martial'), 'Martial weapons (up to 3)', wopts('martial'), { min: 0, max: 3 })));
+      rows.push(row(btn(id('next', s.step), 'Next →', ButtonStyle.Primary, !(s.armor && s.shield !== undefined)), btn(id('kit', 'pick'), '↩ Use a kit instead'), btn(id('cancel'), 'Cancel', ButtonStyle.Danger)));
+    }
+  } else if (s.step === 'gear2') {
+    const extra = [s.pack, ...(s.kitItems || []), ...(s.items || []), ...String(s.gear || '').split(/[,\n]/).map((x) => x.trim()).filter(Boolean)].filter(Boolean);
+    text += `🎒 **Pack and extra gear.**${extra.length ? `\nSo far: ${extra.join(', ')}` : ''}\n💰 Gold: **${s.gold == null ? 10 : s.gold} gp** (change it with ✍️)`;
+    rows.push(row(select(id('pick', 'pack'), s.pack || 'Equipment pack', [{ label: 'No pack', value: 'none', default: !s.pack },
+      ...Object.entries(PACKS).map(([k, v]) => ({ label: k, value: k, description: v.slice(0, 100), default: s.pack === k }))])));
+    rows.push(row(select(id('multi', 'items'), 'Adventuring gear (pick any)', ADVENTURING_GEAR.map((x) => ({ label: x, value: x, default: (s.items || []).includes(x) })), { min: 0, max: ADVENTURING_GEAR.length })));
+    rows.push(row(btn(id('modal', 'gear'), '✍️ Other items & gold'), btn(id('next', s.step), 'Next →', ButtonStyle.Primary), btn(id('cancel'), 'Cancel', ButtonStyle.Danger)));
+  } else if (s.step === 'feats') {
+    const slots = featSlots(s);
+    const i = Math.min(s.featIdx || 0, slots.length);
+    const picks = s.featPicks || [];
+    const done = slots.map((sl, k) => `${k === i ? '▶ ' : ''}${sl.label}: **${picks[k] || '…'}**`).join('\n');
+    if (i < slots.length) {
+      const sl = slots[i];
+      const list = featList(s, sl.type);
+      text += `⭐ **${sl.type === 'style' ? 'Fighting Style' : 'Feats'}** (${i + 1} of ${slots.length})\n${done}`;
+      for (let g = 0; g * 25 < list.length && g < 3; g++) {
+        const part = list.slice(g * 25, g * 25 + 25);
+        rows.push(row(select(id('feat', String(i), String(g)), list.length > 25 ? `${part[0][0]}–${part[part.length - 1][0]}` : sl.label,
+          part.map((n) => ({ label: n, value: n, default: picks[i] === n })))));
+      }
+      rows.push(row(btn(id('modal', `feat${i}`), '✍️ From another book'), btn(id('featidx', String(i + 1)), picks[i] ? 'Next ▶' : 'Skip for now'),
+        btn(id('featidx', String(Math.max(0, i - 1))), '◀ Back', ButtonStyle.Secondary, i === 0), btn(id('cancel'), 'Cancel', ButtonStyle.Danger)));
+    } else {
+      text += `⭐ **Feats**\n${done}`;
+      rows.push(row(btn(id('featidx', '0'), 'Change feats'), btn(id('next', s.step), 'Next →', ButtonStyle.Primary), btn(id('cancel'), 'Cancel', ButtonStyle.Danger)));
+    }
   } else if (s.step === 'spells') {
     const sc = spellCounts(s);
     const maxL = maxSpellLevel(s);
@@ -386,13 +451,14 @@ function view(s) {
     const page = Math.min(s.spellPage || 0, Math.max(0, Math.ceil(all.length / 25) - 1));
     const shown = all.slice(page * 25, page * 25 + 25);
     text += `✨ **Spells.** Pick **${sc.cantrips} cantrips** (${nC} picked) and **${sc.spells} spells ${sc.word}** (${nS} picked)${maxL ? `, up to level ${maxL}` : ''}.`;
-    if (sc.wizardBook) text += ' Wizards: these are the spells you have prepared; add the rest of your spellbook at the end.';
+    if (sc.wizardBook) text += ' Wizards: these are your prepared spells; add the rest of your spellbook with ✍️.';
     const byL = {};
     for (const [n, l] of Object.entries(picks)) (byL[l] ||= []).push(n);
     const listed = Object.keys(byL).sort().map((l) => `${l === '0' ? 'Cantrips' : `Level ${l}`}: ${byL[l].sort().join(', ')}`).join('\n');
     if (listed) text += `\n${listed}`;
     if (nC > sc.cantrips || nS > sc.spells) text += '\n⚠️ That\'s more than you get; remove some.';
-    text += `\n*Spells from the free rules (SRD). Spells from your other books can be typed in at the end.*`;
+    if (s.spells) text += `\nFrom other books: ${s.spells}`;
+    text += `\n*Lists are from the free rules (SRD). Use ✍️ for spells from your other books.*`;
     const levels = [...(sc.cantrips ? [0] : []), ...Array.from({ length: maxL }, (_, k) => k + 1)];
     rows.push(row(select(id('pick', 'spellLevel'), lv ? `Level ${lv} spells` : 'Cantrips', levels.map((l) => ({
       label: l ? `Level ${l} spells` : 'Cantrips', value: String(l), default: l === lv, description: `${classSpells(s, l).length} to choose from`,
@@ -405,18 +471,10 @@ function view(s) {
       rows.push(row(btn(id('spellpage', String(page - 1)), '◀ Previous', ButtonStyle.Secondary, page === 0),
         btn(id('spellpage', String(page + 1)), 'More ▶', ButtonStyle.Secondary, (page + 1) * 25 >= all.length)));
     }
-    rows.push(nav(true));
+    rows.push(row(btn(id('next', s.step), 'Next →', ButtonStyle.Primary), btn(id('modal', 'spells'), '✍️ Spells from other books'), btn(id('cancel'), 'Cancel', ButtonStyle.Danger)));
   } else if (s.step === 'details') {
-    const sc = spellCounts(s);
-    text += `Last bit: **who is this character?**${s.name ? `\n✅ ${s.name}` : ''}${s.extrasDone ? '\n✅ Spells, feats & gear' : ''}`;
-    if (sc) {
-      const n = Object.keys(s.spellPicks || {}).length;
-      text += `\n\n✨ ${n} spell${n === 1 ? '' : 's'} picked from the lists. Spells from your other books${sc.wizardBook ? ' (or the rest of your spellbook)' : ''} go in **🎒 Spells, feats & gear**.`;
-    }
-    const feats = (s.asis || []).filter((x) => x?.kind === 'feat').length + (speciesData(s)?.feats || 0);
-    if (feats) text += `\n⭐ Feats to name: **${feats}**${ed === '2024' ? ` (your background's ${BACKGROUNDS[ed][s.background].feat} is already added)` : ''}.`;
-    rows.push(row(btn(id('modal', 'who'), '✍️ Name & personality', s.name ? ButtonStyle.Secondary : ButtonStyle.Primary),
-      btn(id('modal', 'extras'), '🎒 Spells, feats & gear', ButtonStyle.Secondary)));
+    text += `Last bit: **who is this character?**${s.name ? `\n✅ ${s.name}${s.alignment ? ` (${s.alignment})` : ''}` : ''}`;
+    rows.push(row(btn(id('modal', 'who'), '✍️ Name & personality', s.name ? ButtonStyle.Secondary : ButtonStyle.Primary)));
     rows.push(nav(Boolean(s.name), 'Review →'));
   } else if (s.step === 'review') {
     const ch = buildCharacter(s);
@@ -452,13 +510,14 @@ export async function handleBuilder(interaction, { onSave }) {
   if (action === 'ed') { s.edition = arg; s.step = 'class'; }
   if (action === 'pick') {
     const v = values[0];
-    if (arg === 'cls') { s.cls = v; s.subclass = null; s.classSkills = []; s.expertise = []; s.asis = []; s.spellPicks = {}; s.spellLevel = null; }
+    if (arg === 'cls') { s.cls = v; s.subclass = null; s.classSkills = []; s.expertise = []; s.asis = []; s.spellPicks = {}; s.spellLevel = null; s.kit = null; s.featPicks = []; s.featIdx = 0; }
     else if (arg === 'species') { s.species = v; s.subspecies = null; s.speciesPick = []; s.anySkills = []; }
     else if (arg === 'subspecies') { s.subspecies = v; s.speciesPick = []; s.anySkills = []; }
     else if (arg === 'background') { s.background = v; s.bgBonus = null; s.classSkills = []; }
     else if (arg === 'bgBonus') s.bgBonus = Object.fromEntries(v.split(',').map((x) => { const [a, n] = x.split(':'); return [a, Number(n)]; }));
     else if (arg === 'shield') s.shield = v === 'yes';
     else if (arg === 'spellLevel') { s.spellLevel = Number(v); s.spellPage = 0; }
+    else if (arg === 'pack') s.pack = v === 'none' ? null : v;
     else s[arg] = v;
   }
   if (action === 'multi') s[arg] = values;
@@ -484,6 +543,21 @@ export async function handleBuilder(interaction, { onSave }) {
     s.asis[Number(arg)] = v === 'feat' ? { kind: 'feat' } : v.startsWith('two:') ? { kind: 'two', a: v.slice(4) } : { kind: 'split', a: v.split(':')[1], b: v.split(':')[2] };
   }
   if (action === 'asipage') s.asiPage = Number(arg);
+  if (action === 'kit') {
+    const v = arg === 'pick' ? 'pick' : values[0];
+    if (v === 'pick') s.kit = null;
+    else if (v === 'custom') { s.kit = 'custom'; s.kitItems = []; s.weaponQty = {}; }
+    else {
+      const k = KITS[s.cls][Number(v)];
+      Object.assign(s, { kit: v, armor: k.armor, shield: k.shield, weapons: [...k.weapons], weaponQty: { ...(k.qty || {}) }, pack: k.pack || null, kitItems: [...(k.items || [])] });
+    }
+  }
+  if (action === 'feat') {
+    s.featPicks = s.featPicks || [];
+    s.featPicks[Number(arg)] = values[0];
+    s.featIdx = Number(arg) + 1;
+  }
+  if (action === 'featidx') s.featIdx = Number(arg);
   if (action === 'spells') {
     // This menu shows one page of one spell level: swap that page's picks for what's ticked now.
     const lv = Number(arg);
@@ -508,15 +582,20 @@ export async function handleBuilder(interaction, { onSave }) {
       );
       return interaction.showModal(m);
     }
-    const sc = spellCounts(s);
-    const m = new ModalBuilder().setCustomId(id('form', 'extras')).setTitle('Spells, feats & gear');
-    if (sc) {
-      m.addComponents(row(new TextInputBuilder().setCustomId('spells').setLabel('Other spells, not in the lists. Fireball (3)').setStyle(TextInputStyle.Paragraph)
-        .setRequired(false).setMaxLength(1500).setPlaceholder('Toll the Dead (0), Silvery Barbs (1), Shadow Blade (2)').setValue(s.spells || '')));
+    if (arg === 'spells') {
+      return interaction.showModal(new ModalBuilder().setCustomId(id('form', 'spells')).setTitle('Spells from other books').addComponents(
+        row(new TextInputBuilder().setCustomId('spells').setLabel('Spell names, with the level: Toll the Dead (0)').setStyle(TextInputStyle.Paragraph)
+          .setRequired(false).setMaxLength(1500).setPlaceholder('Toll the Dead (0), Silvery Barbs (1), Shadow Blade (2)').setValue(s.spells || ''))));
     }
-    m.addComponents(row(new TextInputBuilder().setCustomId('feats').setLabel('Feats (comma-separated)').setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(300).setValue(s.feats || '')));
-    m.addComponents(row(new TextInputBuilder().setCustomId('gear').setLabel('Other gear (comma-separated)').setStyle(TextInputStyle.Paragraph).setRequired(false).setMaxLength(1000).setPlaceholder('Explorer\'s pack, rope (50 ft), 2 potions of healing').setValue(s.gear || '')));
-    m.addComponents(row(new TextInputBuilder().setCustomId('gold').setLabel('Gold pieces').setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(8).setValue(String(s.gold ?? ''))));
+    if (arg === 'gear') {
+      return interaction.showModal(new ModalBuilder().setCustomId(id('form', 'gear')).setTitle('Other items & gold').addComponents(
+        row(new TextInputBuilder().setCustomId('gear').setLabel('Other items (comma-separated)').setStyle(TextInputStyle.Paragraph).setRequired(false)
+          .setMaxLength(1000).setPlaceholder('Lucky coin, letter from my sister, 2 bottles of wine').setValue(s.gear || '')),
+        row(new TextInputBuilder().setCustomId('gold').setLabel('Gold pieces').setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(8).setValue(String(s.gold ?? 10)))));
+    }
+    const fi = Number(arg.replace('feat', ''));
+    const m = new ModalBuilder().setCustomId(id('form', `feat${fi}`)).setTitle('A feat from another book').addComponents(
+      row(new TextInputBuilder().setCustomId('feat').setLabel('Feat name').setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(60).setValue((s.featPicks || [])[fi] || '')));
     return interaction.showModal(m);
   }
   if (action === 'form') {
@@ -525,11 +604,17 @@ export async function handleBuilder(interaction, { onSave }) {
       s.name = f('name'); s.alignment = f('alignment') || ''; s.traits = f('traits') || ''; s.backstory = f('backstory') || '';
       const [i1, b1, f1] = (f('ibf') || '').split('\n');
       s.ideals = (i1 || '').trim(); s.bonds = (b1 || '').trim(); s.flaws = (f1 || '').trim();
-    } else {
-      for (const k of ['spells', 'feats', 'gear']) { const v = f(k); if (v !== undefined) s[k] = v; }
+    } else if (arg === 'spells') {
+      s.spells = f('spells') || '';
+    } else if (arg === 'gear') {
+      s.gear = f('gear') || '';
       const g = Number(String(f('gold') || '').replace(/[^\d.]/g, ''));
       s.gold = Number.isFinite(g) ? g : 0;
-      s.extrasDone = true;
+    } else if (arg.startsWith('feat')) {
+      const fi = Number(arg.replace('feat', ''));
+      s.featPicks = s.featPicks || [];
+      s.featPicks[fi] = f('feat');
+      s.featIdx = fi + 1;
     }
   }
   if (action === 'save') {

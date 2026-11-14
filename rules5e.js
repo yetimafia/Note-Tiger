@@ -179,7 +179,7 @@ const SPECIES = {
     Halfling: { asi: { dex: 2 }, speed: 25, languages: 'Common, Halfling', traits: ['Lucky', 'Brave', 'Halfling Nimbleness'],
       sub: { 'Lightfoot Halfling': { asi: { cha: 1 }, traits: ['Naturally Stealthy'] }, 'Stout Halfling': { asi: { con: 1 }, traits: ['Stout Resilience'] } } },
     Human: { asi: { str: 1, dex: 1, con: 1, int: 1, wis: 1, cha: 1 }, speed: 30, languages: 'Common', extraLanguages: 1, traits: [],
-      sub: { 'Human': {}, 'Variant Human': { replaceAsi: true, pick: { n: 2, amount: 1 }, anySkills: 1, feats: 1, traits: ['Feat'] } } },
+      sub: { 'Human': {}, 'Variant Human': { replaceAsi: true, pick: { n: 2, amount: 1 }, anySkills: 1, feats: 1, traits: [] } } },
     Tiefling: { asi: { cha: 2, int: 1 }, speed: 30, languages: 'Common, Infernal', traits: ['Darkvision', 'Hellish Resistance', 'Infernal Legacy'] },
   },
   2024: {
@@ -291,3 +291,85 @@ export function asiLevels(cls, edition) {
   return base.sort((a, b) => a - b);
 }
 export const epicBoonLevel = (edition) => (edition === '2024' ? 19 : null);
+
+// ---------- feats (names; the rules are in your books) ----------
+export const FEATS = {
+  2014: {
+    general: ['Actor', 'Alert', 'Athlete', 'Charger', 'Chef', 'Crossbow Expert', 'Crusher', 'Defensive Duelist', 'Dual Wielder', 'Dungeon Delver',
+      'Durable', 'Eldritch Adept', 'Elemental Adept', 'Fey Touched', 'Fighting Initiate', 'Grappler', 'Great Weapon Master', 'Healer', 'Heavily Armored',
+      'Heavy Armor Master', 'Inspiring Leader', 'Keen Mind', 'Lightly Armored', 'Linguist', 'Lucky', 'Mage Slayer', 'Magic Initiate', 'Martial Adept',
+      'Medium Armor Master', 'Metamagic Adept', 'Mobile', 'Moderately Armored', 'Mounted Combatant', 'Observant', 'Piercer', 'Poisoner', 'Polearm Master',
+      'Resilient', 'Ritual Caster', 'Savage Attacker', 'Sentinel', 'Shadow Touched', 'Sharpshooter', 'Shield Master', 'Skill Expert', 'Skilled', 'Skulker',
+      'Slasher', 'Spell Sniper', 'Tavern Brawler', 'Telekinetic', 'Telepathic', 'Tough', 'War Caster', 'Weapon Master'],
+    style: ['Archery', 'Blind Fighting', 'Defense', 'Dueling', 'Great Weapon Fighting', 'Interception', 'Protection', 'Superior Technique',
+      'Thrown Weapon Fighting', 'Two-Weapon Fighting', 'Unarmed Fighting', 'Blessed Warrior', 'Druidic Warrior'],
+  },
+  2024: {
+    origin: ['Alert', 'Crafter', 'Healer', 'Lucky', 'Magic Initiate (Cleric)', 'Magic Initiate (Druid)', 'Magic Initiate (Wizard)', 'Musician',
+      'Savage Attacker', 'Skilled', 'Tavern Brawler', 'Tough'],
+    general: ['Ability Score Improvement', 'Actor', 'Athlete', 'Charger', 'Chef', 'Crossbow Expert', 'Crusher', 'Defensive Duelist', 'Dual Wielder',
+      'Durable', 'Elemental Adept', 'Fey Touched', 'Grappler', 'Great Weapon Master', 'Heavily Armored', 'Heavy Armor Master', 'Inspiring Leader',
+      'Keen Mind', 'Lightly Armored', 'Mage Slayer', 'Martial Weapon Training', 'Medium Armor Master', 'Moderately Armored', 'Mounted Combatant',
+      'Observant', 'Piercer', 'Poisoner', 'Polearm Master', 'Resilient', 'Ritual Caster', 'Sentinel', 'Shadow Touched', 'Sharpshooter',
+      'Shield Master', 'Skill Expert', 'Skulker', 'Slasher', 'Speedy', 'Spell Sniper', 'Telekinetic', 'Telepathic', 'War Caster', 'Weapon Master'],
+    style: ['Archery', 'Blind Fighting', 'Defense', 'Dueling', 'Great Weapon Fighting', 'Interception', 'Protection', 'Thrown Weapon Fighting',
+      'Two-Weapon Fighting', 'Unarmed Fighting'],
+    epic: ['Boon of Combat Prowess', 'Boon of Dimensional Travel', 'Boon of Energy Resistance', 'Boon of Fate', 'Boon of Fortitude',
+      'Boon of Irresistible Offense', 'Boon of Recovery', 'Boon of Skill', 'Boon of Speed', 'Boon of Spell Recall', 'Boon of the Night Spirit', 'Boon of Truesight'],
+  },
+};
+export const FIGHTING_STYLE_AT = { Fighter: 1, Paladin: 2, Ranger: 2 };
+
+// ---------- gear ----------
+export const PACKS = {
+  "Burglar's Pack": 'backpack, ball bearings (1,000), 10 ft of string, bell, 5 candles, crowbar, hammer, 10 pitons, hooded lantern, 2 flasks of oil, 5 days of rations, tinderbox, waterskin, 50 ft of hempen rope',
+  "Diplomat's Pack": 'chest, 2 map/scroll cases, fine clothes, ink and pen, lamp, 2 flasks of oil, 5 sheets of paper, perfume, sealing wax, soap',
+  "Dungeoneer's Pack": 'backpack, crowbar, hammer, 10 pitons, 10 torches, tinderbox, 10 days of rations, waterskin, 50 ft of hempen rope',
+  "Entertainer's Pack": 'backpack, bedroll, 2 costumes, 5 candles, 5 days of rations, waterskin, disguise kit',
+  "Explorer's Pack": 'backpack, bedroll, mess kit, tinderbox, 10 torches, 10 days of rations, waterskin, 50 ft of hempen rope',
+  "Priest's Pack": 'backpack, blanket, 10 candles, tinderbox, alms box, 2 blocks of incense, censer, vestments, 2 days of rations, waterskin',
+  "Scholar's Pack": 'backpack, book of lore, ink and pen, 10 sheets of parchment, little bag of sand, small knife',
+};
+export const ADVENTURING_GEAR = ['Potion of Healing', "Healer's Kit", 'Rope, hempen (50 ft)', 'Torch', 'Rations (1 day)', 'Waterskin', 'Bedroll',
+  'Tinderbox', 'Crowbar', 'Grappling Hook', 'Hooded Lantern', 'Oil (flask)', 'Caltrops (bag of 20)', 'Ball Bearings (bag of 1,000)', 'Chalk',
+  'Steel Mirror', "Climber's Kit", 'Manacles', 'Holy Water (flask)', 'Antitoxin (vial)', "Thieves' Tools", 'Spellbook', 'Component Pouch',
+  'Arcane Focus (crystal)', 'Holy Symbol (amulet)'];
+// Two quick starting kits per class. items: extra gear; qty: how many of a weapon.
+export const KITS = {
+  Barbarian: [
+    { name: 'Greataxe & javelins', armor: 'none', shield: false, weapons: ['Greataxe', 'Handaxe', 'Javelin'], qty: { Handaxe: 2, Javelin: 4 }, pack: "Explorer's Pack" },
+    { name: 'Axe & shield', armor: 'none', shield: true, weapons: ['Battleaxe', 'Javelin'], qty: { Javelin: 4 }, pack: "Explorer's Pack" }],
+  Bard: [
+    { name: 'Rapier & lute', armor: 'Leather armor', shield: false, weapons: ['Rapier', 'Dagger'], pack: "Diplomat's Pack", items: ['Lute'] },
+    { name: 'Longsword & stage', armor: 'Leather armor', shield: false, weapons: ['Longsword', 'Dagger'], pack: "Entertainer's Pack", items: ['Lute'] }],
+  Cleric: [
+    { name: 'Mace & shield', armor: 'Scale mail', shield: true, weapons: ['Mace', 'Light crossbow'], pack: "Priest's Pack", items: ['Holy Symbol (amulet)', 'Crossbow bolts (20)'] },
+    { name: 'Light and quick', armor: 'Leather armor', shield: true, weapons: ['Mace'], pack: "Explorer's Pack", items: ['Holy Symbol (amulet)'] }],
+  Druid: [
+    { name: 'Scimitar & shield', armor: 'Leather armor', shield: true, weapons: ['Scimitar'], pack: "Explorer's Pack", items: ['Druidic Focus (wooden staff)', 'Herbalism Kit'] },
+    { name: 'Staff & sickle', armor: 'Leather armor', shield: false, weapons: ['Quarterstaff', 'Sickle'], pack: "Explorer's Pack", items: ['Druidic Focus (sprig of mistletoe)', 'Herbalism Kit'] }],
+  Fighter: [
+    { name: 'Sword & board', armor: 'Chain mail', shield: true, weapons: ['Longsword', 'Light crossbow'], pack: "Dungeoneer's Pack", items: ['Crossbow bolts (20)'] },
+    { name: 'Archer', armor: 'Leather armor', shield: false, weapons: ['Longbow', 'Shortsword'], qty: { Shortsword: 2 }, pack: "Explorer's Pack", items: ['Arrows (20)'] }],
+  Monk: [
+    { name: 'Shortsword & darts', armor: 'none', shield: false, weapons: ['Shortsword', 'Dart'], qty: { Dart: 10 }, pack: "Explorer's Pack" },
+    { name: 'Spear & darts', armor: 'none', shield: false, weapons: ['Spear', 'Dart'], qty: { Dart: 10 }, pack: "Dungeoneer's Pack" }],
+  Paladin: [
+    { name: 'Sword & shield', armor: 'Chain mail', shield: true, weapons: ['Longsword', 'Javelin'], qty: { Javelin: 5 }, pack: "Priest's Pack", items: ['Holy Symbol (amulet)'] },
+    { name: 'Greatsword', armor: 'Chain mail', shield: false, weapons: ['Greatsword', 'Javelin'], qty: { Javelin: 5 }, pack: "Explorer's Pack", items: ['Holy Symbol (amulet)'] }],
+  Ranger: [
+    { name: 'Two blades & bow', armor: 'Scale mail', shield: false, weapons: ['Shortsword', 'Longbow'], qty: { Shortsword: 2 }, pack: "Explorer's Pack", items: ['Arrows (20)', 'Quiver'] },
+    { name: 'Light scout', armor: 'Leather armor', shield: false, weapons: ['Scimitar', 'Longbow'], qty: { Scimitar: 2 }, pack: "Dungeoneer's Pack", items: ['Arrows (20)', 'Quiver'] }],
+  Rogue: [
+    { name: 'Rapier & bow', armor: 'Leather armor', shield: false, weapons: ['Rapier', 'Shortbow', 'Dagger'], qty: { Dagger: 2 }, pack: "Burglar's Pack", items: ['Arrows (20)', "Thieves' Tools"] },
+    { name: 'Shortsword & bow', armor: 'Leather armor', shield: false, weapons: ['Shortsword', 'Shortbow', 'Dagger'], qty: { Dagger: 2 }, pack: "Explorer's Pack", items: ['Arrows (20)', "Thieves' Tools"] }],
+  Sorcerer: [
+    { name: 'Crossbow & pouch', armor: 'none', shield: false, weapons: ['Light crossbow', 'Dagger'], qty: { Dagger: 2 }, pack: "Explorer's Pack", items: ['Crossbow bolts (20)', 'Component Pouch'] },
+    { name: 'Staff & focus', armor: 'none', shield: false, weapons: ['Quarterstaff', 'Dagger'], qty: { Dagger: 2 }, pack: "Dungeoneer's Pack", items: ['Arcane Focus (crystal)'] }],
+  Warlock: [
+    { name: 'Crossbow & pouch', armor: 'Leather armor', shield: false, weapons: ['Light crossbow', 'Dagger'], qty: { Dagger: 2 }, pack: "Scholar's Pack", items: ['Crossbow bolts (20)', 'Component Pouch'] },
+    { name: 'Staff & focus', armor: 'Leather armor', shield: false, weapons: ['Quarterstaff', 'Dagger'], qty: { Dagger: 2 }, pack: "Dungeoneer's Pack", items: ['Arcane Focus (orb)'] }],
+  Wizard: [
+    { name: 'Staff & pouch', armor: 'none', shield: false, weapons: ['Quarterstaff'], pack: "Scholar's Pack", items: ['Spellbook', 'Component Pouch'] },
+    { name: 'Dagger & focus', armor: 'none', shield: false, weapons: ['Dagger'], pack: "Explorer's Pack", items: ['Spellbook', 'Arcane Focus (wand)'] }],
+};
