@@ -1,6 +1,9 @@
-**New in 2.8.4**
-- 📚 **Your shelf is sorted by game system.** Note Tiger reads each book and groups it (Shadowrun, Fallout, Vampire…), with the core rulebook on the front of each stack. Click a system to slide out every book in it.
-- Drag a whole system into a game at once, or single books. Drag a book onto another system to move it, double-click a system's name to rename it, and ★ picks a different cover.
-- Games show their books grouped the same way.
+**New in 2.9.0: Council mode** (Settings → Council)
+- 🏛 List several local AIs (this PC and/or other PCs on your home network running Ollama). Each one labels the night (table talk, fights, NPC voices) and writes a recap draft. Each line goes by majority vote, and a judge merges the drafts, keeping what at least two agree on and leaning on the GM's narration.
+- PCs work at the same time. Several models on one PC take turns, so you can try it before buying hardware.
+- A member that's off, asleep or too slow is skipped. If nobody answers, this PC does the recap alone, so you never lose a session.
+- Live status for each member in Settings and on the Dashboard. Each session shows 🏛 with who took part.
+- **compare-council.bat** compares one AI with the council on a past session (on a copy; nothing changes).
+- With 0 or 1 members, or with Claude, everything works exactly as before.
 
 Your settings, sessions and rulebooks are kept when you update.

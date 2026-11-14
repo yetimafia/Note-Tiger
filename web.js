@@ -38,6 +38,12 @@ export const SETTINGS = [
   { key: 'UPDATE_CHECK' },
   { key: 'ALERTS_ENABLED' },
   { key: 'ALERT_USER_ID' },
+  { key: 'COUNCIL_MEMBERS' },
+  { key: 'COUNCIL_LABELS' },
+  { key: 'COUNCIL_RECAP' },
+  { key: 'COUNCIL_JUDGE_URL' },
+  { key: 'COUNCIL_JUDGE_MODEL' },
+  { key: 'COUNCIL_TIMEOUT' },
 ];
 
 function readEnvLines() {
@@ -119,6 +125,12 @@ export function startWeb(ctx, port) {
       // GET /api/status
       if (parts[1] === 'status' && req.method === 'GET') return send(res, 200, ctx.status());
 
+      // Council: GET /api/council (status of the saved members), POST /api/council/check (members not saved yet)
+      if (parts[1] === 'council' && !parts[2] && req.method === 'GET') return send(res, 200, await ctx.councilStatus());
+      if (parts[1] === 'council' && parts[2] === 'check' && req.method === 'POST') {
+        const { members } = await readBody(req);
+        return send(res, 200, { members: await ctx.councilCheck(members) });
+      }
       // GET/POST /api/settings
       if (parts[1] === 'settings') {
         if (req.method === 'GET') {

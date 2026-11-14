@@ -128,7 +128,7 @@ export async function findTableTalk(lines, askAI, { isGM = () => false, onProgre
 
 // Drops the parts of a sentence that say someone died, was shot, killed or stabbed.
 const VIOLENCE = /\b(died|dies|dying|dead|killed|kills|shot|stabbed|murdered|drive-?by)\b/i;
-function withoutViolence(text) {
+export function withoutViolence(text) {
   if (!text || !VIOLENCE.test(text)) return text;
   return text.split(/(?<=[.;])\s+|,\s*(?:and\s+|after\s+|with\s+|while\s+)?/).filter((part) => !VIOLENCE.test(part))
     .join(', ').replace(/,\s*$/, '').trim();

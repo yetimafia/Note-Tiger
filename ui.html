@@ -205,6 +205,14 @@
   .newsys span { font-size: 26px; color: var(--accent); display: block; }
   .shelf { gap: 22px 26px; }
   .game .bkgrid { gap: 22px 26px; }
+
+  .crow { display: grid; grid-template-columns: 1fr 1.6fr 1.2fr auto 34px; gap: 8px; align-items: center; margin-bottom: 8px; }
+  .crow input { margin: 0; }
+  .crow .cstat { font-size: 12px; white-space: nowrap; min-width: 150px; }
+  .crow .cstat.ok { color: var(--green, #4ade80); } .crow .cstat.bad { color: var(--red); } .crow .cstat.warn { color: var(--accent); }
+  .crow .cdel { background: none; border: 1px solid var(--line); color: var(--dim); border-radius: 8px; height: 34px; cursor: pointer; }
+  .crow .cdel:hover { color: var(--red); border-color: var(--red); }
+  .chead { display: grid; grid-template-columns: 1fr 1.6fr 1.2fr auto 34px; gap: 8px; font-size: 12px; color: var(--dim); margin-bottom: 4px; }
   .tag.tt { background: var(--bg); color: var(--dim); border: 1px solid var(--line); }
   .tview.hide-tt .tblock.tt { display: none; }
   .timeline { border-left: 2px solid var(--line); margin-left: 56px; }
@@ -430,6 +438,37 @@
       </div>
     </div>
 
+
+    <div class="card" id="councilCard">
+      <h2>🏛 Council <span class="hint" style="font-weight:400">several local AIs vote</span></h2>
+      <div class="hint">Run the same work on several local AIs (this PC and/or other PCs on your home network running Ollama) and combine
+        their answers. Different model families make different mistakes, so the vote catches more of them. With 0 or 1 members it's off and
+        Note Tiger works as usual. Members on different PCs work at the same time; members on the same PC take turns.</div>
+      <div id="councilClaude" class="banner warn" style="margin-top:10px" hidden>The council is for the free local AI. With Claude selected it's off.</div>
+      <div id="councilRows" style="margin-top:12px"></div>
+      <div class="row" style="gap:8px;margin-top:8px;flex-wrap:wrap">
+        <button class="btn ghost" id="councilAdd">＋ Add member</button>
+        <button class="btn ghost" id="councilAddThis">＋ This PC</button>
+        <button class="btn ghost" id="councilCheck">Check members</button>
+        <span class="hint" id="councilSummary"></span>
+      </div>
+      <datalist id="councilModels"></datalist>
+      <div style="margin-top:14px">
+        <label class="switch"><input type="checkbox" id="COUNCIL_LABELS"> <span><b>Line labeling:</b> table talk, fights and NPC voices by majority vote</span></label>
+        <label class="switch"><input type="checkbox" id="COUNCIL_RECAP"> <span><b>Recap:</b> every member writes a draft, the judge merges them</span></label>
+      </div>
+      <div class="row" style="gap:12px;flex-wrap:wrap;margin-top:6px">
+        <div style="flex:1;min-width:220px"><label for="COUNCIL_JUDGE_URL">Judge address</label>
+          <input type="text" id="COUNCIL_JUDGE_URL" placeholder="blank = this PC"></div>
+        <div style="flex:1;min-width:180px"><label for="COUNCIL_JUDGE_MODEL">Judge model</label>
+          <input type="text" id="COUNCIL_JUDGE_MODEL" list="councilModels" placeholder="blank = the local model above"></div>
+        <div style="width:150px"><label for="COUNCIL_TIMEOUT">Timeout (minutes)</label>
+          <input type="number" id="COUNCIL_TIMEOUT" min="1" max="120" placeholder="10"></div>
+      </div>
+      <div class="hint">The judge keeps only what at least two drafts agree on, leaning on the GM's narration. If a member is off, asleep
+        or too slow (one answer taking longer than the timeout), it's skipped and the rest carry on; if nobody answers, this PC does it alone.
+        On another PC, start Ollama with <code>OLLAMA_HOST=0.0.0.0</code> and allow port 11434 through its firewall.</div>
+    </div>
     <div class="card">
       <h2>Table talk</h2>
       <label class="switch"><input type="checkbox" id="SEPARATE_TABLE_TALK"> Keep off-topic chatter out of the recap</label>
@@ -713,6 +752,7 @@ function renderHome() {
   const siteRow = site?.enabled && site.configured && site.url ? [['Player website', `${site.published.length} published`, site.url]] : [];
   $('#homeStats').innerHTML = [...siteRow.map(([l, v, u]) => `<div class="card stat"><div class="label">${l}</div><div class="value"><a href="${esc(u)}" target="_blank" style="color:var(--accent2)">${esc(v)} ↗</a></div></div>`), ...[
     ['Recap AI', s.ai + (s.usingClaude ? '' : s.ollama === 'ready' ? ' ✓' : ' ⚠')],
+    ...(s.council ? [['Council', `${s.council.ready} of ${s.council.members} AIs ready${s.council.ready < s.council.members ? ' ⚠' : ' ✓'}`]] : []),
     ['Speech-to-text', { idle: 'Waiting', loading: 'Downloading…', ready: 'Ready ✓', error: 'Error ⚠' }[s.speech.state]],
     ['Sessions recorded', totalSessions],
   ].map(([l, v]) => `<div class="card stat"><div class="label">${l}</div><div class="value">${esc(v)}</div></div>`)].join('');
@@ -1435,7 +1475,7 @@ function renderTranscript(s) {
   const voices = [...new Set(s.entries.filter((e) => e.voice && e.voice !== 'GM' && e.voice !== 'Narrator').map((e) => e.voice))].sort();
   const fixer = `<div class="row" style="justify-content:space-between;margin-bottom:8px">
       <label class="switch" style="margin:0"><input type="checkbox" id="fixToggle" ${fixMode ? 'checked' : ''}> ✏️ Fix mistakes <span class="hint">(click a line, Shift-click to select a stretch)</span></label>
-      ${s.manualFixes ? `<span class="hint">${s.manualFixes} line${s.manualFixes === 1 ? '' : 's'} fixed by hand</span>` : ''}</div>
+      ${s.manualFixes ? `<span class="hint">${s.manualFixes} line${s.manualFixes === 1 ? '' : 's'} fixed by hand</span>` : ''}${councilBadge(s.council)}</div>
     <div class="fixbar" id="fixBar" hidden>
       <b id="fixCount"></b>
       <button class="btn ghost" type="button" data-fix="tt">🐿️ Table talk</button>
@@ -1534,6 +1574,105 @@ $('#publishAllBtn').addEventListener('click', async (e) => {
   e.target.disabled = false;
 });
 
+
+// ---------- council (Settings) ----------
+function councilRowHtml(m = {}) {
+  return `<div class="crow">
+    <input type="text" class="c-name" placeholder="Name, e.g. Den PC" value="${esc(m.name || '')}">
+    <input type="text" class="c-url" placeholder="http://192.168.1.20:11434" value="${esc(m.url || '')}">
+    <input type="text" class="c-model" list="councilModels" placeholder="qwen3:14b" value="${esc(m.model || '')}">
+    <span class="cstat hint">not checked</span>
+    <button class="cdel" title="Remove">×</button></div>`;
+}
+function councilRowsData() {
+  return [...document.querySelectorAll('#councilRows .crow')].map((r) => ({
+    name: r.querySelector('.c-name').value.replace(/[#`]/g, '').trim(),
+    url: r.querySelector('.c-url').value.trim(),
+    model: r.querySelector('.c-model').value.trim(),
+  })).filter((m) => m.url && m.model);
+}
+function wireCouncilRows() {
+  document.querySelectorAll('#councilRows .cdel').forEach((b) => b.onclick = () => { b.closest('.crow').remove(); councilCount(); });
+  document.querySelectorAll('#councilRows input').forEach((i) => i.oninput = councilCount);
+}
+function councilCount() {
+  const n = councilRowsData().length;
+  const rows = $('#councilRows');
+  if (!rows.querySelector('.chead')) rows.insertAdjacentHTML('afterbegin', '<div class="chead"><span>Name</span><span>Ollama address</span><span>Model</span><span>Status</span><span></span></div>');
+  rows.querySelector('.chead').hidden = !rows.querySelector('.crow');
+  $('#councilSummary').textContent = n >= 2 ? `Council on: ${n} members.` : n === 1 ? 'Add one more member to turn the council on.' : 'Off (no members).';
+}
+function addCouncilRow(m) {
+  $('#councilRows').insertAdjacentHTML('beforeend', councilRowHtml(m));
+  wireCouncilRows(); councilCount();
+}
+function showCouncilChecks(list) {
+  const rows = [...document.querySelectorAll('#councilRows .crow')];
+  const models = new Set();
+  let k = 0;   // the server answers in the same order as the filled-in rows
+  for (const r of rows) {
+    const url = r.querySelector('.c-url').value.trim(), model = r.querySelector('.c-model').value.trim();
+    const st = r.querySelector('.cstat');
+    st.title = '';
+    if (!url || !model) { st.className = 'cstat hint'; st.textContent = 'fill in address and model'; continue; }
+    const c = list[k++];
+    if (!c) { st.className = 'cstat hint'; st.textContent = 'not checked'; continue; }
+    c.models.forEach((x) => models.add(x));
+    if (c.reachable && c.hasModel) { st.className = 'cstat ok'; st.textContent = `✓ ready (${c.ms} ms)`; }
+    else if (c.reachable) { st.className = 'cstat warn'; st.textContent = `⚠ no ${c.model}`; st.title = `Has: ${c.models.join(', ') || 'no models'}. Run "ollama pull ${c.model}" on that PC.`; }
+    else { st.className = 'cstat bad'; st.textContent = '✗ not reachable'; st.title = c.problem; }
+  }
+  $('#councilModels').innerHTML = [...models].map((m) => `<option value="${esc(m)}">`).join('');
+  const ready = list.filter((c) => c.reachable && c.hasModel).length;
+  const machines = new Set(list.map((c) => c.machine)).size;
+  $('#councilSummary').textContent = list.length >= 2
+    ? `${ready} of ${list.length} ready on ${machines} PC${machines === 1 ? '' : 's'}${machines < list.length ? ' (members on the same PC take turns)' : ''}.`
+    : councilRowsData().length === 1 ? 'Add one more member to turn the council on.' : 'Off (no members).';
+}
+async function checkCouncil() {
+  const btn = $('#councilCheck'); btn.disabled = true;
+  document.querySelectorAll('#councilRows .cstat').forEach((s) => { s.className = 'cstat hint'; s.textContent = 'checking…'; });
+  try { showCouncilChecks((await api('/api/council/check', { method: 'POST', body: { members: councilRowsData() } })).members); }
+  catch (e) { toast(e.message); } finally { btn.disabled = false; }
+}
+function loadCouncil(s) {
+  let members = [];
+  try { members = JSON.parse(s.COUNCIL_MEMBERS || '[]'); } catch { /* bad value */ }
+  $('#councilRows').innerHTML = '';
+  members.forEach((m) => addCouncilRow(m));
+  councilCount();
+  $('#COUNCIL_LABELS').checked = s.COUNCIL_LABELS !== 'false';
+  $('#COUNCIL_RECAP').checked = s.COUNCIL_RECAP !== 'false';
+  $('#COUNCIL_JUDGE_URL').value = s.COUNCIL_JUDGE_URL || '';
+  $('#COUNCIL_JUDGE_MODEL').value = s.COUNCIL_JUDGE_MODEL || '';
+  $('#COUNCIL_TIMEOUT').value = s.COUNCIL_TIMEOUT || 10;
+  $('#councilClaude').hidden = !s.ANTHROPIC_API_KEY.set;
+  if (members.length) checkCouncil();
+}
+$('#councilAdd').onclick = () => addCouncilRow({});
+$('#councilAddThis').onclick = () => addCouncilRow({ name: 'This PC', url: 'http://127.0.0.1:11434', model: $('#OLLAMA_MODEL').value.trim() || 'gemma3:12b' });
+$('#councilCheck').onclick = checkCouncil;
+document.querySelectorAll('input[name=ai]').forEach((r) => r.addEventListener('change', () => { $('#councilClaude').hidden = document.querySelector('input[name=ai]:checked').value !== 'claude'; }));
+
+// Who took part in a session's council (council.json): "🏛 Council: labels 3/3 · recap 2/3, judge merged".
+function councilBadge(c) {
+  if (!c || (!c.labels && !c.recap)) return '';
+  const part = (x, name) => {
+    if (!x) return '';
+    const ok = (x.members || []).filter((m) => m.ok).length, all = (x.members || []).length;
+    return `${name} ${ok}/${all}`;
+  };
+  const lines = [];
+  for (const [k, name] of [['labels', 'Labeling'], ['recap', 'Recap']]) {
+    const x = c[k]; if (!x) continue;
+    lines.push(`${name}: ${x.used || ''}`);
+    for (const m of x.members || []) lines.push(`  ${m.ok ? '✓' : '✗'} ${m.name} (${m.model})${m.secs != null ? ` ${m.secs}s` : ''}${m.error ? `: ${m.error}` : ''}`);
+    if (x.judge) lines.push(`  judge ${x.judge.ok ? `✓ ${x.judge.model} ${x.judge.secs}s` : `✗ ${x.judge.error}`}`);
+  }
+  const text = [part(c.labels, 'labels'), part(c.recap, 'recap')].filter(Boolean).join(' · ');
+  return ` <span class="tag" style="cursor:help" title="${esc(lines.join('\n'))}">🏛 Council: ${esc(text)}</span>`;
+}
+
 let loadedSettings = null;
 async function loadSettings() {
   const s = loadedSettings = await api('/api/settings');
@@ -1568,6 +1707,7 @@ async function loadSettings() {
   $('#ALERTS_ENABLED').checked = s.ALERTS_ENABLED !== 'false';
   $('#ALERT_USER_ID').value = s.ALERT_USER_ID || '';
   showUpdateStatus();
+  loadCouncil(s);
   const url = status?.site?.url;
   $('#siteHint').innerHTML = url && status.site.configured ? `Site: <a href="${esc(url)}" target="_blank" style="color:var(--accent2)">${esc(url)}</a>` : '';
   const w = $('#WHISPER_MODEL');
@@ -1607,6 +1747,12 @@ $('#saveBtn').addEventListener('click', async () => {
     GM_CHANNEL: $('#GM_CHANNEL').value.replace(/^#/, '').trim() || 'gm',
     GM_ROLE: $('#GM_ROLE').value.trim() || 'Game Master, GM, Storyteller, DM',
     ANTHROPIC_API_KEY: ai === 'claude' ? $('#ANTHROPIC_API_KEY').value : '',
+    COUNCIL_MEMBERS: JSON.stringify(councilRowsData()),
+    COUNCIL_LABELS: $('#COUNCIL_LABELS').checked ? 'true' : 'false',
+    COUNCIL_RECAP: $('#COUNCIL_RECAP').checked ? 'true' : 'false',
+    COUNCIL_JUDGE_URL: $('#COUNCIL_JUDGE_URL').value.trim(),
+    COUNCIL_JUDGE_MODEL: $('#COUNCIL_JUDGE_MODEL').value.trim(),
+    COUNCIL_TIMEOUT: String(Math.max(1, Math.min(120, Number($('#COUNCIL_TIMEOUT').value) || 10))),
   };
   if (ai === 'local') body.clear_ANTHROPIC_API_KEY = true; // no key = local AI
   if (ai === 'claude' && !body.ANTHROPIC_API_KEY && !loadedSettings.ANTHROPIC_API_KEY.set) { toast('Paste your Claude API key first.'); return; }

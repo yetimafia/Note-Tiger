@@ -12,8 +12,9 @@ import {
 } from './store.js';
 import { updateCampaign, updateStory, rulesSection, updateVoiceCards, buildCampaign } from './campaign.js';
 import { knownNames } from './spelling.js';
-import { findTableTalk, gameLogText } from './squirrel.js';
+import { findTableTalk, gameLogText, withoutViolence } from './squirrel.js';
 import { findVoices } from './voices.js';
+import { councilConfig, runCouncil, voteTableTalk, voteVoices, judgeDrafts, saveCouncilRecord, setCouncilOverride } from './council.js';
 
 // ---------- progress (shown as a progress bar in Note Tiger) ----------
 // Key: "<server id>/<session id>". Stages: tagging 0–70%, opening recap 70–75%, notes and recap 75–99%, contacts 99–100%.
@@ -90,6 +91,31 @@ Players joke and talk big a lot ("I shoot him", "he's dead", "we all die"): only
 narrates it or the GAME LOG says it happened.`;
 
 // ---------- tagging: table talk, fights, events, and who the GM is voicing ----------
+// One AI's labels for the whole night: 1) the game tracker reads a stretch at a time with a running memory of the game
+// (table talk, real fights, what actually happened); 2) the voice pass works out who the GM is voicing, in order,
+// with the scene and the NPCs met so far. ask = askAI, or one council member.
+async function labelLines(lines, ask, { players, known, onFrac = () => {}, log = () => {} }) {
+  const empty = Object.assign(new Set(), { verdicts: [], combat: new Set() });
+  let tt = empty;
+  try {
+    tt = await findTableTalk(lines, ask, { isGM: (l) => l.gm, log, onProgress: (i, n) => onFrac(0.78 * i / n) });
+  } catch (err) {
+    console.error('[game tracker] skipped:', err.message);
+  }
+  let voices = new Map();
+  if (lines.some((l) => l.gm)) {
+    const sceneLog = tt.verdicts.map((v) => ({ t0: lines[v.from].t, t1: lines[v.to - 1].t, scene: v.scene }));
+    const sceneAt = (t) => (sceneLog.find((v) => v.t0 <= t && t <= v.t1) || {}).scene || '';
+    try {
+      voices = await findVoices(lines, ask, { isGM: (l) => l.gm, players, known, sceneAt, log, onProgress: (i, n) => onFrac(0.78 + 0.22 * i / n) });
+    } catch (err) {
+      console.error('[voices] skipped:', err.message);
+    }
+  }
+  onFrac(1);
+  return { tt, voices };
+}
+
 export async function tagLines(dir, { force = false } = {}) {
   const lines = sessionLines(dir);
   const saved = readJSON(path.join(dir, 'labels.json'), {});
@@ -109,36 +135,42 @@ export async function tagLines(dir, { force = false } = {}) {
   const started = Date.now();
   const offTopic = new Set();
   const voices = new Map();
-  // 1) Game tracker: reads the night a stretch at a time with a running memory of the game, to spot table talk,
-  //    real fights, and what actually happened (much more reliable than line by line for local models).
-  let sceneLog = [], combat = [];
-  try {
-    const found = await findTableTalk(lines, askAI, {
-      isGM: (l) => l.gm,
-      log: (m) => console.log(m),
-      onProgress: (i, n) => setProgress(dir, 0, 55, i / n, `Following the game (table talk, fights, events): part ${i} of ${n}`),
-    });
-    if (SEPARATE_TABLE_TALK) for (const i of found) offTopic.add(lineKey(lines[i]));
-    sceneLog = found.verdicts.map((v) => ({ ...v, t0: lines[v.from].t, t1: lines[v.to - 1].t }));
-    combat = [...found.combat].map((i) => lineKey(lines[i]));
-  } catch (err) {
-    console.error('[game tracker] skipped:', err.message);
-  }
-  // 2) Who the GM is voicing: the conversation in order, with the scene and the NPCs met so far.
-  if (lines.some((l) => l.gm)) {
+  let known = [];
+  try { if (lines.some((l) => l.gm)) known = buildCampaign(gidOf(dir), { upTo: dir }).contacts.map((c) => c.name); } catch { /* no campaign yet */ }
+  const opts = { players: new Set(playerNames), known, log: (m) => console.log(m) };
+  let found = null;
+  // Council: every member labels the whole night; each line takes the majority vote.
+  const council = councilConfig();
+  if (council.labels) {
     try {
-      const known = buildCampaign(gidOf(dir), { upTo: dir }).contacts.map((c) => c.name);
-      const sceneAt = (t) => (sceneLog.find((v) => v.t0 <= t && t <= v.t1) || {}).scene || '';
-      const found = await findVoices(lines, askAI, {
-        isGM: (l) => l.gm, players: new Set(playerNames), known, sceneAt,
-        log: (m) => console.log(m),
-        onProgress: (i, n) => setProgress(dir, 55, 70, i / n, `Working out who the GM is voicing: part ${i} of ${n}`),
+      const { results, record, lead } = await runCouncil('line labeling',
+        (m, ask, onFrac) => labelLines(lines, ask, { ...opts, onFrac }),
+        { onProgress: (f, label) => setProgress(dir, 0, 70, f, `Council: following the game and the NPC voices (${label})`) });
+      if (results.length) {
+        found = {
+          tt: voteTableTalk(results.map((r) => r.value.tt), lines.length, lead, withoutViolence),
+          voices: voteVoices(results.map((r) => r.value.voices), lead, known),
+        };
+      }
+      saveCouncilRecord(dir, 'labels', {
+        members: record, lead: results[lead] ? results[lead].member.name : null,
+        used: results.length > 1 ? `majority vote of ${results.length}` : results.length ? 'one member only' : 'fallback: this PC alone',
       });
-      for (const [i, v] of found) voices.set(lineKey(lines[i]), v);
+      if (!results.length) console.log('[council] nobody answered: labeling with this PC alone');
     } catch (err) {
-      console.error('[voices] skipped:', err.message);
+      console.error('[council] labeling failed, using this PC alone:', err.message);
     }
   }
+  // The usual way: this PC's model alone.
+  if (!found) {
+    found = await labelLines(lines, askAI, {
+      ...opts, onFrac: (f) => setProgress(dir, 0, 70, f, f < 0.78 ? 'Following the game (table talk, fights, events)' : 'Working out who the GM is voicing'),
+    });
+  }
+  const sceneLog = found.tt.verdicts.map((v) => ({ ...v, t0: lines[v.from].t, t1: lines[v.to - 1].t }));
+  const combat = [...found.tt.combat].map((i) => lineKey(lines[i]));
+  if (SEPARATE_TABLE_TALK) for (const i of found.tt) offTopic.add(lineKey(lines[i]));
+  for (const [i, v] of found.voices) voices.set(lineKey(lines[i]), v);
   updateLabels(dir, {
     sceneLog, combat,
     tagVersion: 4, lineCount: lines.length, voiceLineCount: lines.length,
@@ -215,8 +247,10 @@ const TABLE_TALK_NOTE = `TABLE TALK (off-topic chatter, not part of the game). D
 the Best Lines section. Mark any quote you take from it with "(table talk)".`;
 
 // Long sessions are too big for a local model in one go, so: notes per chunk, then one recap from the notes.
-async function writeRecap(title, date, gameText, tableText, prevRecap, dir = null) {
-  const step = (frac, label) => dir && setProgress(dir, 75, 99, frac, label);
+// ask = askAI, or one council member; onStep replaces the progress bar updates (the council reports its own).
+async function writeRecap(title, date, gameText, tableText, prevRecap, dir = null, { ask = askAI, onStep = null } = {}) {
+  const step = onStep || ((frac, label) => dir && setProgress(dir, 75, 99, frac, label));
+  const askAI = ask;
   const prevPart = prevRecap ? `For context, here is the PREVIOUS session's recap:\n${prevRecap}\n\n---\n\n` : '';
   const names = dir ? knownNames(gidOf(dir)) : '';
   const namesPart = names ? `Correct spellings of names in this campaign (the transcript may mangle them): ${names}\n\n` : '';
@@ -243,6 +277,44 @@ async function writeRecap(title, date, gameText, tableText, prevRecap, dir = nul
     `(treat them as the game transcript):\n\n${notes.join('\n\n')}${tablePart}`, 4000);
 }
 
+// Council recap: every member writes a draft (in parallel across machines), then the judge merges them, keeping what
+// at least two drafts agree on and leaning on the GM's narration and the game log. Returns null if nobody could write
+// one, so the caller falls back to this PC alone.
+async function councilRecap(meta, gameText, tableText, prevRecap, dir) {
+  const rec = { members: [], used: '' };
+  try {
+    const { results, record, lead } = await runCouncil('recap drafts',
+      (m, ask, onFrac) => writeRecap(meta.title, meta.date, gameText, tableText, prevRecap, dir, { ask, onStep: (f) => onFrac(f) }),
+      { onProgress: (f, label) => setProgress(dir, 75, 95, f, `Council: writing recap drafts (${label})`) });
+    rec.members = record;
+    const drafts = results.filter((r) => String(r.value || '').trim().length > 150).map((r) => ({ name: r.member.name, model: r.member.model, text: r.value }));
+    if (!drafts.length) { rec.used = 'fallback: this PC alone'; console.log('[council] no drafts: writing the recap with this PC alone'); return null; }
+    if (drafts.length === 1) { rec.used = `one draft only (${drafts[0].name})`; return drafts[0].text; }
+    setProgress(dir, 95, 99, 0, `Council: the judge is merging ${drafts.length} drafts`);
+    try {
+      const log = gameLogText(readJSON(path.join(dir, 'labels.json'), {}).sceneLog);
+      const j = await judgeDrafts(drafts, { gameLog: log, gameText, title: `${meta.title} (${meta.date})` });
+      rec.judge = { ...j.judge, ok: true, secs: j.secs };
+      rec.used = `judge merged ${drafts.length} drafts`;
+      return j.text;
+    } catch (err) {
+      // No judge: the judge model's own draft if it wrote one, else the first.
+      const pick = results[lead] && drafts.find((d) => d.name === results[lead].member.name) || drafts[0];
+      rec.judge = { ok: false, error: String(err.message).slice(0, 200) };
+      rec.used = `judge failed; used ${pick.name}'s draft`;
+      console.error(`[council] judge failed (${err.message}); using ${pick.name}'s draft`);
+      return pick.text;
+    }
+  } catch (err) {
+    rec.used = 'fallback: this PC alone';
+    rec.error = String(err.message).slice(0, 200);
+    console.error('[council] recap failed, using this PC alone:', err.message);
+    return null;
+  } finally {
+    try { saveCouncilRecord(dir, 'recap', rec); } catch { /* never lose the recap over the record */ }
+  }
+}
+
 // Tags table talk, writes transcript.txt and recap.md for a session folder, and returns the recap.
 export async function recapSession(dir, opts = {}) {
   setProgress(dir, 0, 1, 0, 'Starting…');
@@ -263,13 +335,10 @@ async function recapSessionInner(dir, { prevRecap = previousRecap(dir), reclassi
   const recap = await detectOpeningRecap(dir, { prevRecap, force: reclassify });
   const labels = { offTopic, voices, recap };
   writeTranscriptFiles(dir);
-  const text = await writeRecap(
-    meta.title, meta.date,
-    formatTranscript(lines, notes, labels, 'game'),
-    offTopic.size ? formatTranscript(lines, [], labels, 'table') : '',
-    prevRecap,
-    dir,
-  );
+  const gameText = formatTranscript(lines, notes, labels, 'game');
+  const tableText = offTopic.size ? formatTranscript(lines, [], labels, 'table') : '';
+  let text = councilConfig().recap ? await councilRecap(meta, gameText, tableText, prevRecap, dir) : null;
+  if (!text) text = await writeRecap(meta.title, meta.date, gameText, tableText, prevRecap, dir);
   // Contacts and loose ends come from the recap; a failure here never loses the recap itself.
   try {
     setProgress(dir, 99, 100, 0, 'Updating contacts and loose ends');
@@ -294,6 +363,28 @@ async function recapSessionInner(dir, { prevRecap = previousRecap(dir), reclassi
   const full = rules ? `${text.trim()}\n\n${rules}` : text;
   fs.writeFileSync(path.join(dir, 'recap.md'), full);
   return full;
+}
+
+// For compare-council.mjs: labels and recap for a COPY of a session folder, with or without the council.
+// Doesn't touch contacts, the story, voice cards or anything else outside that folder.
+export async function recapForComparison(dir, { council, prevRecap = null }) {
+  setCouncilOverride(council ? { labels: true, recap: true } : { labels: false, recap: false });
+  try {
+    const meta = readJSON(path.join(dir, 'meta.json'), {});
+    const lines = sessionLines(dir);
+    const notes = readJSON(path.join(dir, 'notes.json'), []);
+    await tagLines(dir, { force: true });
+    const { offTopic, voices } = readLabels(dir);
+    const recap = await detectOpeningRecap(dir, { prevRecap, force: true });
+    const labels = { offTopic, voices, recap };
+    const gameText = formatTranscript(lines, notes, labels, 'game');
+    const tableText = offTopic.size ? formatTranscript(lines, [], labels, 'table') : '';
+    let text = council ? await councilRecap(meta, gameText, tableText, prevRecap, dir) : null;
+    if (!text) text = await writeRecap(meta.title, meta.date, gameText, tableText, prevRecap, dir);
+    return { text, labels: readJSON(path.join(dir, 'labels.json'), {}), lines };
+  } finally {
+    setCouncilOverride(null);
+  }
 }
 
 export const RECAP_SYSTEM = `You are the campaign scribe for ${CAMPAIGN_NAME}, a Shadowrun tabletop RPG game.

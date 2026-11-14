@@ -15,6 +15,13 @@ import { gmPrep } from './campaign.js';
 import { sendAlert, testAlert } from './alerts.js';
 import { campaignBook } from './book.js';
 import { recapSession, askArchive, ollamaStatus, refreshOllama, AI_LABEL, getProgress, askAI } from './ai.js';
+import { councilStatus, checkMember, parseMembers, machineOf } from './council.js';
+
+// Council status for the dashboard (checked every 30 s; the Settings page asks for a fresh check).
+let councilCache = null;
+const refreshCouncil = () => councilStatus({ fresh: true }).then((c) => { councilCache = c; return c; }).catch(() => councilCache);
+refreshCouncil();
+setInterval(refreshCouncil, 30_000).unref();
 import { startWeb } from './web.js';
 import { publishSite, siteStatus, siteConfigured } from './site.js';
 import { LIB_DIR, listBooks, syncLibrary, libraryProgress, addBook, removeBook, askBooks, renderPage, serverSetups, setServerSetup, bookCover, librarySystems, setBookSystem, renameSystem, setSystemCover } from './library.js';
@@ -132,6 +139,12 @@ function guildList() {
 }
 
 startWeb({
+  councilStatus() { return refreshCouncil(); },
+  // Checks members typed in Settings before they're saved.
+  async councilCheck(list) {
+    const members = parseMembers(JSON.stringify(list || []));
+    return Promise.all(members.map(async (m) => ({ ...m, machine: machineOf(m.url), ...(await checkMember(m)) })));
+  },
   status() {
     const clientId = botStatus?.clientId;
     return {
@@ -146,6 +159,7 @@ startWeb({
       usingClaude: USE_CLAUDE,
       ollama: USE_CLAUDE ? null : ollamaStatus(),
       ollamaModel: OLLAMA_MODEL,
+      council: councilCache && councilCache.on ? { members: councilCache.members.length, ready: councilCache.ready, labels: councilCache.labels, recap: councilCache.recap } : null,
       speech: bot && botStatus?.speech ? botStatus.speech : { state: 'idle', model: WHISPER_MODEL },
       canInstallLocalAI: process.platform === 'win32',
       campaign: CAMPAIGN_NAME,

@@ -118,6 +118,28 @@ After that, every session is published automatically when it ends (and again aft
 
 > Changing the password re-encrypts everything and the old one stops working. Older encrypted copies stay in the repo's history, still locked with the old password.
 
+## Council mode (optional): several local AIs vote
+
+Settings → **Council** lists local AIs: this PC and/or other PCs on your home network running Ollama. Each member
+does the same work and the answers are combined:
+
+- **Line labeling:** every member follows the game (table talk, fights) and works out who the GM is voicing. Each line
+  takes the majority vote; ties go to the judge's model. Spellings of one name ("Grim"/"Grimm") count as one vote.
+- **Recap:** every member writes a draft; the **judge** (default: this PC's model) merges them, keeping what at least
+  two drafts agree on and settling disagreements with the GM's narration and the game log.
+
+Members on different PCs work at the same time; members on the same PC take turns (so you can try a council on one PC
+with two models before buying hardware). A member that's off, asleep, missing its model, or slower than the timeout is
+skipped; if nobody answers, this PC does the work alone as usual. With 0 or 1 members, or with Claude selected, the
+council is off. Each session's `council.json` records who took part (shown as 🏛 in the Sessions tab).
+
+On another PC: install Ollama, `ollama pull <model>`, set the environment variable `OLLAMA_HOST=0.0.0.0`, restart
+Ollama, and allow TCP port 11434 through that PC's firewall. Use a different model family on each PC (e.g. Qwen3 14B,
+Mistral Nemo 12B, Phi-4 14B) so their mistakes don't line up.
+
+To compare one AI with the council on a past session, run **compare-council.bat** in the app folder (it works on a
+copy; nothing is changed). The report is in `logs\council-compare\report.txt`.
+
 ## Troubleshooting
 
 | Problem | Fix |
@@ -148,7 +170,7 @@ npm run test-speech   # downloads the speech model
 
 Everything stays on your PC, in `%LOCALAPPDATA%\Programs\Note Tiger\app` (right-click the 🐯 icon → **Open data folder**):
 - `.env`: your settings and keys (the control panel edits this for you; never share it)
-- `data/`: every session's transcript, notes and recap
+- `data/`: every session's transcript, notes and recap (plus `council.json`, who took part, when council mode ran)
 - `models/`: the downloaded speech model
 
 Updating or uninstalling keeps your settings and sessions unless you choose to delete them.

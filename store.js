@@ -230,6 +230,7 @@ export function readSession(gid, id) {
     stats: sessionStats(dir),
     colors,
     timeline: sessionTimeline(dir),
+    council: readJSON(path.join(dir, 'council.json'), null),   // which AIs took part (council mode)
   };
 }
 
