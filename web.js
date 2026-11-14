@@ -135,6 +135,11 @@ export function startWeb(ctx, port) {
         if (fs.existsSync(icon)) return send(res, 200, fs.readFileSync(icon), 'image/png');
         return send(res, 404, { error: 'Not found' });
       }
+      // The pixel font for the control panel (only these files).
+      if (/^\/fonts\/pixelify-sans-(400|700)\.woff2$/.test(url.pathname)) {
+        res.writeHead(200, { 'Content-Type': 'font/woff2', 'Cache-Control': 'max-age=604800' });
+        return res.end(fs.readFileSync(path.join(here, url.pathname)));
+      }
       if (url.pathname === '/' || url.pathname === '/index.html') {
         return send(res, 200, fs.readFileSync(path.join(here, 'ui.html'), 'utf8'), 'text/html; charset=utf-8');
       }

@@ -54,12 +54,12 @@ func panelPort(base string) string {
 // (a page loaded from a string isn't allowed to call localhost itself).
 const loadingPage = `<!DOCTYPE html><html><head><meta charset="utf-8"><style>
 body{margin:0;height:100vh;display:flex;align-items:center;justify-content:center;flex-direction:column;
-background:#0d0f14;color:#e6e8ee;font:15px system-ui,"Segoe UI",sans-serif}
-.t{font-size:28px;font-weight:800;margin-bottom:10px}.t span{color:#f5a524}
-.s{color:#9aa3b5}.spin{width:28px;height:28px;border:3px solid #2a3140;border-top-color:#f5a524;border-radius:50%;
+background:#14110f;color:#eae2d6;font:15px system-ui,"Segoe UI",sans-serif}
+.t{font-size:28px;font-weight:800;margin-bottom:10px}.t span{color:#f08a24}
+.s{color:#a39684}.spin{width:28px;height:28px;border:3px solid #3a322b;border-top-color:#f08a24;border-radius:50%;
 animation:r 1s linear infinite;margin:22px}@keyframes r{to{transform:rotate(360deg)}}
 .err{display:none;color:#ffb3bb;max-width:460px;text-align:center;line-height:1.5}
-</style></head><body><div class="t">🐯 Note <span>Tiger</span></div><div class="spin" id="spin"></div>
+</style></head><body><div class="t">NOTE <span>TIGER</span></div><div class="spin" id="spin"></div>
 <div class="s" id="s">Starting up…</div><div class="err" id="e">Note Tiger isn't responding. Right-click the tiger icon by the clock
 and choose <b>Open log file</b> to see why, or choose <b>Restart Note Tiger</b>.</div>
 <script>window.ntShowError = () => { e.style.display = "block"; s.style.display = "none"; spin.style.display = "none"; };</script>

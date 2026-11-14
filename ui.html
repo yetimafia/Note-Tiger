@@ -7,9 +7,10 @@
 <link rel="icon" href="/favicon.png">
 <style>
   :root {
-    --bg: #0d0f14; --panel: #151922; --panel2: #1c212d; --line: #2a3140;
-    --text: #e6e8ee; --dim: #9aa3b5; --accent: #f5a524; --accent2: #3dd6c6;
-    --red: #ff5d6c; --green: #42d392; --radius: 10px;
+    --bg: #14110f; --panel: #1e1a17; --panel2: #2a231d; --line: #3a322b;
+    --text: #eae2d6; --dim: #a39684; --accent: #f08a24; --accent2: #3dd6c6;
+    --red: #ff5d6c; --green: #6fd47a; --radius: 3px; --ink: #0b0807;
+    --pixel: "Pixelify Sans", system-ui, sans-serif;
   }
   * { box-sizing: border-box; }
   body { margin: 0; font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; background: var(--bg); color: var(--text); }
@@ -282,11 +283,39 @@
   .fixbar input { width: 170px; }
   .switch { display: flex; align-items: center; gap: 8px; font-weight: 400; margin: 0; cursor: pointer; }
   @media (max-width: 900px) { .sessions { grid-template-columns: minmax(0, 1fr); } .list { max-height: 220px; } nav { margin-left: 0; } header { flex-wrap: wrap; } }
+
+  /* ---------- pixel-art look (matches Dungeon Tiger) ---------- */
+  @font-face { font-family: "Pixelify Sans"; src: url(/fonts/pixelify-sans-400.woff2) format("woff2"); font-weight: 400 500; font-display: swap; }
+  @font-face { font-family: "Pixelify Sans"; src: url(/fonts/pixelify-sans-700.woff2) format("woff2"); font-weight: 600 800; font-display: swap; }
+  body { background-color: var(--bg);
+    background-image: linear-gradient(45deg, #ffffff05 25%, transparent 25%, transparent 75%, #ffffff05 75%), linear-gradient(45deg, #ffffff05 25%, transparent 25%, transparent 75%, #ffffff05 75%);
+    background-size: 8px 8px; background-position: 0 0, 4px 4px; }
+  header { background: var(--panel); border-bottom: 3px solid var(--ink); box-shadow: 0 3px 0 #2a231d; }
+  .logo { font-family: var(--pixel); font-weight: 700; font-size: 22px; letter-spacing: 1px; display: flex; align-items: center; gap: 10px; text-transform: uppercase; }
+  .logo img { width: 34px; height: 34px; image-rendering: pixelated; }
+  h1, h2, h3, nav button, .stat .label, .tabs2 button, legend { font-family: var(--pixel); letter-spacing: .3px; }
+  h1 { font-size: 26px; } h2 { font-size: 19px; font-weight: 600; }
+  nav button { font-size: 16px; border-radius: 2px; border: 2px solid transparent; }
+  nav button.active { background: var(--panel2); border-color: var(--ink); box-shadow: inset 0 -3px 0 var(--accent); color: var(--text); }
+  .card { border: 2px solid var(--ink); box-shadow: 4px 4px 0 var(--ink), inset 0 0 0 1px #3a322b; border-radius: 3px; }
+  .banner { border-width: 2px; box-shadow: 3px 3px 0 var(--ink); border-radius: 3px; }
+  button.btn { font-family: var(--pixel); font-size: 16px; font-weight: 600; letter-spacing: .3px; border: 2px solid var(--ink); border-radius: 2px;
+    box-shadow: inset -3px -3px 0 #0000003d, inset 3px 3px 0 #ffffff33, 2px 2px 0 var(--ink); }
+  button.btn:active:not(:disabled) { transform: translate(2px, 2px); box-shadow: inset -3px -3px 0 #0000003d, inset 3px 3px 0 #ffffff33; }
+  button.btn.ghost { border-color: var(--ink); }
+  button.btn.danger { border-color: #5c1f28; box-shadow: 2px 2px 0 var(--ink); }
+  input[type=text], input[type=password], input[type=time], input[type=number], select, textarea { border: 2px solid var(--line); border-radius: 2px; background: #0f0d0b; }
+  input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); outline-offset: 0; }
+  .radio label, .item, .list, .tag { border-radius: 2px; }
+  .item.sel { border-color: var(--accent); box-shadow: inset 3px 0 0 var(--accent); }
+  .dot { border-radius: 0; }
+  ::-webkit-scrollbar { width: 12px; height: 12px; } ::-webkit-scrollbar-track { background: #0f0d0b; }
+  ::-webkit-scrollbar-thumb { background: #3a322b; border: 2px solid #0f0d0b; }
 </style>
 </head>
 <body>
 <header>
-  <div class="logo">🐯 Note <span>Tiger</span></div>
+  <div class="logo"><img src="/favicon.png" alt="">Note <span>Tiger</span></div>
   <nav>
     <button data-tab="home" class="active">Dashboard</button>
     <button data-tab="sessions">Sessions</button>
