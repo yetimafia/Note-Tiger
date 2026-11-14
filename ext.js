@@ -126,6 +126,9 @@ export function startConnections(api) {
       if (r[0] === 'info' && req.method === 'GET') return send(res, 200, api.info());
       if (r[0] === 'servers' && req.method === 'GET') return send(res, 200, { servers: api.servers() });
 
+      // The player website: GET /v1/site, POST /v1/site/live { url, token, title } or { offline: true }
+      if (r[0] === 'site' && !r[1] && req.method === 'GET') return send(res, 200, api.site());
+      if (r[0] === 'site' && r[1] === 'live' && req.method === 'POST') { const b = await readJson(req); return send(res, 200, await api.publishLive(b)); }
       // Characters
       if (r[0] === 'characters') {
         if (r[1] === 'random' && req.method === 'POST') {

@@ -215,6 +215,27 @@ async function doPublish({ dirs, all }) {
   return { url, published: target.length, total: every.length };
 }
 
+// A live game from another program (Dungeon Tiger): its join link goes on the site, encrypted like everything else,
+// so only people with the group password see the "Join the dungeon" button.
+export function publishLive({ url, token, title, offline } = {}) {
+  const run = busy.then(async () => {
+    if (!siteConfigured()) throw new Error('Note Tiger\'s player website isn\'t set up (Settings → Player website).');
+    if (!offline && !/^https:\/\/[a-z0-9-]+\.trycloudflare\.com$/.test(String(url || ''))) throw new Error('That isn\'t a link Note Tiger will post.');
+    const st = siteState();
+    // After a password change, the whole site has to be re-encrypted first.
+    if (st.passwordChanged || !Object.keys(st.published || {}).length) await doPublish({ all: true });
+    const key = siteKey(siteState());
+    const live = offline ? { offline: true, at: new Date().toISOString() }
+      : { url, token: String(token || '').replace(/[^\w-]/g, '').slice(0, 64), title: String(title || 'Dungeon Tiger').slice(0, 60), at: new Date().toISOString() };
+    await commitFiles({ 'data/live.enc': encryptJSON(live, key), 'index.html': fs.readFileSync(path.join(SITE_DIR, 'index.html'), 'utf8') }, offline ? 'Live game ended' : 'Live game link');
+    const siteLink = await ensurePages().catch(() => siteUrl());
+    console.log(`[website] ${offline ? 'took down the live game link' : 'posted the live game link'}`);
+    return { ok: true, siteUrl: siteLink };
+  });
+  busy = run.catch(() => {});
+  return run;
+}
+
 export function siteStatus() {
   const st = readJSON(STATE_FILE, null);
   return {

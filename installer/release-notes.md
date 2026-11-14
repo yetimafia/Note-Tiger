@@ -1,6 +1,6 @@
-**New in 2.14.0: a pixel-art look**
-- 🐯 A new **pixel-art tiger** logo for the window, the tray icon, the installer and recap books.
-- 🎨 The control panel has a pixel-art style to match Dungeon Tiger: warm dungeon colours, a pixel font for headings, tabs and buttons, chunky borders and buttons that press in.
-- Everything works the same as before. Only the look changed.
+**New in 2.15.0: join Dungeon Tiger games from the player website**
+- ⚔️ When Dungeon Tiger puts its players' website online, a **Join the dungeon** button shows on your Note Tiger player website, behind the same group password. Players unlock the site as usual and tap it to play.
+- The link is encrypted like everything else on the site, and it's taken down when the game goes offline.
+- 🐛 Fixed: re-indexing the rulebook library also tried to start the Connections server a second time, which only logged an error.
 
 Your settings, sessions and rulebooks are kept when you update.

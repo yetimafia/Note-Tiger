@@ -132,6 +132,9 @@
   @keyframes r { to { transform: rotate(360deg); } }
   footer { color: var(--dim); font-size: 12px; text-align: center; margin-top: 40px; }
   @media (max-width: 600px) { .nav { flex-wrap: nowrap; overflow-x: auto; padding-bottom: 4px; scrollbar-width: none; } .nav a { white-space: nowrap; } .campaign { display: none; } .recap { padding: 4px 14px 10px; } }
+  .livebtn { font-weight: 700; background: #f08a24; color: #1a0f05; text-decoration: none; padding: 6px 12px; border-radius: 2px; border: 2px solid #0b0807; box-shadow: 2px 2px 0 #0b0807; margin-right: 8px; white-space: nowrap; }
+  .livebanner { display: block; margin: 0 0 16px; padding: 12px 14px; background: #2b2112; border: 2px solid #f08a24; color: #ffd9a8; text-decoration: none; border-radius: 3px; box-shadow: 3px 3px 0 #0b0807; }
+  .livebtn:active { transform: translate(2px, 2px); box-shadow: none; }
 </style>
 </head>
 <body>
@@ -143,7 +146,7 @@
 const $ = (s, el = document) => el.querySelector(s);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const app = $('#app');
-let key = null, manifest = null, config = null;
+let key = null, manifest = null, config = null, live = null;
 const cache = new Map();
 
 const b64 = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
@@ -179,6 +182,7 @@ function showLock(msg = '') {
       const k = await deriveKey(pw);
       manifest = await decryptFile('data/manifest.enc', k);
       key = k;
+      loadLive();
       if ($('#remember').checked) {
         try { localStorage.setItem('nt-key-' + config.salt, JSON.stringify(await crypto.subtle.exportKey('jwk', k))); } catch {}
       }
@@ -200,9 +204,19 @@ const fmtDur = (ms) => { const m = Math.round(ms / 60000); return m >= 60 ? `${M
 const clock = (t) => new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 const niceDate = (d) => { const x = new Date(d + 'T12:00:00'); return isNaN(x) ? d : x.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' }); };
 
+// A live game (Dungeon Tiger) running right now: its join link is in data/live.enc.
+async function loadLive() {
+  try {
+    const l = await decryptFile('data/live.enc');
+    live = l && !l.offline && l.url && Date.now() - new Date(l.at) < 36 * 3600_000 ? l : null;
+  } catch { live = null; }
+  if (live && key) route();
+}
+const joinLink = () => `${live.url}/#t=${encodeURIComponent(live.token)}`;
 function header() {
-  return `<header><div class="wrap"><div class="logo" onclick="location.hash=''">🐯 Note <span>Tiger</span></div>
+  return `<header><div class="wrap"><div class="logo" onclick="location.hash=''"><img src="tiger.png" alt="" style="width:28px;height:28px;image-rendering:pixelated;vertical-align:-7px"> Note <span>Tiger</span></div>
     <div class="campaign">${esc(manifest.campaign || '')}</div><div class="spacer"></div>
+    ${live ? `<a class="livebtn" href="${esc(joinLink())}">⚔️ Join the dungeon</a>` : ''}
     <button class="ghost" onclick="lockAgain()">Lock</button></div></header>`;
 }
 
@@ -396,7 +410,7 @@ function showThreads() {
 
 function showList() {
   const sessions = [...manifest.sessions].reverse();
-  app.innerHTML = header() + `<div class="wrap">${nav('list')}<h2 class="page">Sessions</h2>
+  app.innerHTML = header() + `<div class="wrap">${nav('list')}${live ? `<a class="livebanner" href="${esc(joinLink())}">⚔️ <b>${esc(live.title || 'Dungeon Tiger')} is live right now.</b> Tap to join the dungeon.</a>` : ''}<h2 class="page">Sessions</h2>
     <p class="sub">${sessions.length} session${sessions.length === 1 ? '' : 's'} · updated ${esc(new Date(manifest.updated).toLocaleString())}</p>
     ${sessions.length ? `<div class="cards">${sessions.map((s) => `<div class="card" onclick="location.hash='${s.id}'">
       <div class="t">${esc(s.title)}</div><div class="d">${esc(niceDate(s.date))} · ${fmtDur(s.stats?.totalMs || 0)}</div>
@@ -535,6 +549,7 @@ window.addEventListener('hashchange', route);
       const k = await crypto.subtle.importKey('jwk', JSON.parse(saved), { name: 'AES-GCM' }, true, ['decrypt']);
       manifest = await decryptFile('data/manifest.enc', k);
       key = k;
+      loadLive();
     }
   } catch { try { localStorage.removeItem('nt-key-' + config.salt); } catch {} }
   route();

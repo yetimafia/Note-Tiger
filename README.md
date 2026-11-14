@@ -157,6 +157,7 @@ to pick a server; without it, the first one is used.
 | Search the rulebooks / ask a rules question | `GET /v1/rules/search?q=grapple`, `POST /v1/rules/ask` `{ "question": "How does grappling work?" }` |
 | SRD spell lists | `GET /v1/rules/spells?edition=2024&class=Wizard&level=1` |
 | Recap a run (written by the AI, posted to #recaps) | `POST /v1/runs` `{ "title": "...", "outcome": "...", "party": ["..."], "events": ["...", "..."] }` then `GET /v1/runs/<id>` until `status` is `done` |
+| Post a live game's join link on the player website | `POST /v1/site/live` `{ "url": "https://….trycloudflare.com", "token": "…", "title": "Dungeon Tiger" }`, or `{ "offline": true }` to take it down. `GET /v1/site` says whether the website is set up. |
 
 Runs are saved in `data/<server>/runs/`, not with recorded sessions.
 
