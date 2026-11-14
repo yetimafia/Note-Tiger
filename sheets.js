@@ -101,7 +101,7 @@ export function normalize(c) {
     })).filter((s) => s.name),
   };
   out.personality = Object.fromEntries(['traits', 'ideals', 'bonds', 'flaws'].map((k) => [k, str(out.personality?.[k])]));
-  for (const k of ['player', 'playerId', 'edition', 'species', 'size', 'background', 'alignment', 'speed', 'hitDice', 'proficiencies', 'languages', 'appearance', 'backstory', 'notes']) out[k] = str(out[k]);
+  for (const k of ['player', 'playerId', 'tag', 'edition', 'species', 'size', 'background', 'alignment', 'speed', 'hitDice', 'proficiencies', 'languages', 'appearance', 'backstory', 'notes']) out[k] = str(out[k]);
   out.inspiration = Boolean(out.inspiration);
   // At-the-table state (Party tracker): death saves, conditions, exhaustion, spent hit dice, concentration.
   const t = out.tracker || {};

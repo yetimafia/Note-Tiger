@@ -625,3 +625,96 @@ export async function handleBuilder(interaction, { onSave }) {
   }
   return interaction.update(view(s));
 }
+
+// ---------- random characters (for pickup games and other programs, through the connection API) ----------
+const PRIORITY = {
+  Barbarian: ['str', 'con', 'dex', 'wis', 'cha', 'int'], Bard: ['cha', 'dex', 'con', 'wis', 'int', 'str'], Cleric: ['wis', 'con', 'str', 'dex', 'cha', 'int'],
+  Druid: ['wis', 'con', 'dex', 'int', 'cha', 'str'], Fighter: ['str', 'con', 'dex', 'wis', 'cha', 'int'], Monk: ['dex', 'wis', 'con', 'str', 'int', 'cha'],
+  Paladin: ['str', 'cha', 'con', 'wis', 'dex', 'int'], Ranger: ['dex', 'wis', 'con', 'str', 'int', 'cha'], Rogue: ['dex', 'con', 'int', 'cha', 'wis', 'str'],
+  Sorcerer: ['cha', 'con', 'dex', 'wis', 'int', 'str'], Warlock: ['cha', 'con', 'dex', 'wis', 'int', 'str'], Wizard: ['int', 'con', 'dex', 'wis', 'cha', 'str'],
+};
+const NAMES = {
+  first: ['Aria', 'Bram', 'Cora', 'Dax', 'Elara', 'Finn', 'Gwen', 'Hale', 'Isla', 'Joren', 'Kira', 'Lio', 'Mira', 'Nox', 'Orin', 'Pell', 'Quill', 'Rhea',
+    'Soren', 'Tamsin', 'Ulric', 'Vex', 'Wren', 'Xan', 'Yara', 'Zed', 'Bryn', 'Calla', 'Dorian', 'Esme', 'Garrick', 'Hesper', 'Ivo', 'Juno', 'Kael', 'Lark'],
+  last: ['Ashdown', 'Brightwater', 'Coldbrook', 'Duskmantle', 'Emberfall', 'Fairwind', 'Grimsby', 'Hollowell', 'Ironfoot', 'Jadecrest', 'Kettleburn',
+    'Lightfoot', 'Moonwhisper', 'Nettlefield', 'Oakhart', 'Pinecrest', 'Quickhand', 'Ravenmoor', 'Stonebrook', 'Thornwood', 'Underbough', 'Vale', 'Whitlock'],
+};
+const TRAITS = ['Always counts the exits.', 'Laughs at danger, then regrets it.', 'Collects odd trinkets.', 'Talks to their weapon.',
+  'Never turns down a bet.', 'Hums when nervous.', 'Distrusts anyone too polite.', 'Keeps a journal of every monster seen.', 'Shares food with strangers.'];
+const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
+const shuffle = (arr) => { const a = [...arr]; for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
+
+// opts: { edition '2014'|'2024', level 1-20, cls, species, background, name, method 'array'|'roll', player, playerId }
+export function randomCharacter(opts = {}) {
+  const edition = opts.edition === '2014' ? '2014' : '2024';
+  const level = Math.max(1, Math.min(20, Number(opts.level) || 1));
+  const cls = CLASSES[opts.cls] ? opts.cls : pick(Object.keys(CLASSES));
+  const c = CLASSES[cls];
+  const s = { edition, level, cls, player: opts.player || '', playerId: opts.playerId || '' };
+  const sub = c.sub[edition];
+  if (level >= sub.at) s.subclass = pick(sub.list);
+  const speciesList = SPECIES[edition];
+  s.species = speciesList[opts.species] ? opts.species : pick(Object.keys(speciesList));
+  if (speciesList[s.species].sub) s.subspecies = pick(Object.keys(speciesList[s.species].sub));
+  const prio = PRIORITY[cls];
+  // 2024 backgrounds raise abilities: pick one that helps this class.
+  const bgNames = Object.keys(BACKGROUNDS[edition]);
+  const suits = edition === '2024' ? bgNames.filter((b) => BACKGROUNDS[edition][b].abilities.includes(prio[0])) : bgNames;
+  s.background = BACKGROUNDS[edition][opts.background] ? opts.background : pick(suits.length ? suits : bgNames);
+  // Ability scores: the best scores in what the class needs.
+  const pool = opts.method === 'roll' ? Array.from({ length: 6 }, rollStat).sort((a, b) => b - a) : [...STANDARD_ARRAY];
+  s.base = Object.fromEntries(prio.map((a, i) => [a, pool[i]]));
+  const sp = speciesData(s);
+  if (sp.pick) s.speciesPick = prio.filter((a) => !(s.species === 'Half-Elf' && a === 'cha')).slice(0, sp.pick.n);
+  if (edition === '2024') {
+    const bgAb = BACKGROUNDS[edition][s.background].abilities;
+    const order = [...bgAb].sort((a, b) => prio.indexOf(a) - prio.indexOf(b));
+    s.bgBonus = { [order[0]]: 2, [order[1]]: 1 };
+  }
+  // Skills and expertise.
+  const fixed = fixedSkills(s);
+  s.classSkills = shuffle(c.skills.from.filter((k) => !fixed.has(k))).slice(0, c.skills.n);
+  s.anySkills = shuffle(ALL_SKILLS.filter((k) => !fixed.has(k) && !s.classSkills.includes(k))).slice(0, sp.anySkills);
+  const profs = [...new Set([...fixed, ...s.classSkills, ...s.anySkills])];
+  s.expertise = shuffle(profs).slice(0, expertiseCount(s));
+  // Ability increases: the main score to 20, now and then a feat.
+  s.asis = [];
+  for (let i = 0; i < asiCount(s); i++) {
+    const sc = finalScores(s);
+    if (Math.random() < 0.25 && sc[prio[0]] >= 18) s.asis.push({ kind: 'feat' });
+    else if (sc[prio[0]] <= 18) s.asis.push({ kind: 'two', a: prio[0] });
+    else s.asis.push({ kind: 'split', a: prio[1], b: sc[prio[2]] < 20 ? prio[2] : prio[3] });
+  }
+  // Gear: one of the class kits.
+  const kits = KITS[cls];
+  const kitIdx = Math.floor(Math.random() * kits.length);
+  const k = kits[kitIdx];
+  Object.assign(s, { kit: String(kitIdx), armor: k.armor, shield: k.shield, weapons: [...k.weapons], weaponQty: { ...(k.qty || {}) }, pack: k.pack || null,
+    kitItems: [...(k.items || [])], items: ['Potion of Healing'], gold: 10 + Math.floor(Math.random() * 15) });
+  // Feats (a fighting style that suits the kit).
+  s.featPicks = featSlots(s).map((sl) => {
+    if (sl.type === 'style') return k.weapons.some((w) => WEAPONS.martial[w]?.[2]?.includes('r') || WEAPONS.simple[w]?.[2]?.includes('r')) && /Archer|bow/i.test(k.name) ? 'Archery' : 'Defense';
+    return pick(featList(s, sl.type).filter((n) => n !== 'Ability Score Improvement'));
+  });
+  // Spells: cantrips that deal damage first, then spells spread over the levels it can cast.
+  const counts = spellCounts(s);
+  if (counts && castsSpells(s)) {
+    s.spellPicks = {};
+    const cantrips = classSpells(s, 0);
+    const dmg = shuffle(cantrips.filter((x) => x.d)); const rest = shuffle(cantrips.filter((x) => !x.d));
+    for (const x of [...dmg.slice(0, 1), ...shuffle([...dmg.slice(1), ...rest])].slice(0, counts.cantrips)) s.spellPicks[x.n] = 0;
+    const maxL = maxSpellLevel(s);
+    for (let i = 0; i < counts.spells && maxL > 0; i++) {
+      // Lean towards the higher levels it can cast, like a real character would.
+      const lv = Math.min(maxL, 1 + Math.floor(Math.sqrt(Math.random()) * maxL));
+      const options = classSpells(s, lv).filter((x) => s.spellPicks[x.n] === undefined);
+      const healers = options.filter((x) => x.h);
+      const chosen = i === 0 && healers.length && ['Cleric', 'Druid', 'Paladin', 'Bard'].includes(cls) ? pick(healers) : pick(options.filter((x) => x.d).length && Math.random() < 0.6 ? options.filter((x) => x.d) : options);
+      if (chosen) s.spellPicks[chosen.n] = lv;
+    }
+  }
+  s.name = opts.name || `${pick(NAMES.first)} ${pick(NAMES.last)}`;
+  s.traits = pick(TRAITS);
+  s.alignment = pick(['Neutral Good', 'Chaotic Good', 'Lawful Good', 'True Neutral', 'Chaotic Neutral', 'Lawful Neutral']);
+  return buildCharacter(s);
+}

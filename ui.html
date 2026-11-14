@@ -520,6 +520,23 @@
     </div>
 
 
+
+    <div class="card" id="connectCard">
+      <h2>🔌 Connections <span class="hint" style="font-weight:400">let other programs use Note Tiger</span></h2>
+      <div class="hint">For programs like the Dungeon Delve game: they can make random characters, update the Party tracker, look things up in your
+        rulebooks, and send a run for a recap. Nothing can connect unless this is on, and every request needs the key below.</div>
+      <label class="switch" style="margin-top:10px"><input type="checkbox" id="CONNECT_ENABLED"> <span><b>Allow connections</b></span></label>
+      <div class="row" style="gap:8px;flex-wrap:wrap;margin-top:8px;align-items:center">
+        <span>Key: <code id="connKey">none yet</code></span>
+        <button class="btn ghost" id="connShow" type="button">Show &amp; copy</button>
+        <button class="btn ghost" id="connNew" type="button">New key</button>
+      </div>
+      <div class="row" style="gap:12px;flex-wrap:wrap;margin-top:8px">
+        <div style="width:140px"><label for="CONNECT_PORT">Port</label><input type="number" id="CONNECT_PORT" min="1024" max="65535" placeholder="3081"></div>
+        <label class="switch" style="align-self:flex-end"><input type="checkbox" id="CONNECT_LAN"> <span>Allow other PCs on my network</span></label>
+      </div>
+      <div class="hint" id="connAddr" style="margin-top:6px"></div>
+    </div>
     <div class="card" id="councilCard">
       <h2>🏛 Council <span class="hint" style="font-weight:400">several local AIs vote</span></h2>
       <div class="hint">Run the same work on several local AIs (this PC and/or other PCs on your home network running Ollama) and combine
@@ -2019,6 +2036,36 @@ $('#partyShort').onclick = () => partyRest('shortRest');
 $('#partyLong').onclick = () => partyRest('longRest');
 $('#partyGuild').addEventListener('change', () => { partySaid = {}; loadParty(); });
 
+
+// ---------- connections (Settings) ----------
+async function loadConnections(s) {
+  $('#CONNECT_ENABLED').checked = s.CONNECT_ENABLED === 'true';
+  $('#CONNECT_PORT').value = s.CONNECT_PORT || 3081;
+  $('#CONNECT_LAN').checked = s.CONNECT_LAN === 'true';
+  const info = await api('/api/connections').catch(() => null);
+  if (!info) return;
+  $('#connKey').textContent = info.hasKey ? info.key : 'none yet';
+  const port = info.port || 3081;
+  $('#connAddr').innerHTML = `Address for programs on this PC: <code>http://localhost:${port}/v1</code>` +
+    (info.lan && info.lanAddresses.length ? `<br>From other PCs: ${info.lanAddresses.map((a) => `<code>http://${a}:${port}/v1</code>`).join(' or ')}` : '') +
+    '<br>Changing the port or "other PCs" takes effect after you restart Note Tiger. Turning it on/off and new keys work right away.';
+}
+$('#connShow').onclick = async () => {
+  const { key } = await api('/api/connections/key');
+  if (!key) return toast('Make a key first.');
+  $('#connKey').textContent = key;
+  try { await navigator.clipboard.writeText(key); toast('Key copied'); } catch { toast('Select the key to copy it'); }
+};
+$('#connNew').onclick = async () => {
+  if ($('#connKey').textContent !== 'none yet' && !confirm('Make a new key? Programs using the old one will stop working until you give them the new one.')) return;
+  const { key } = await api('/api/connections/newkey', { method: 'POST', body: {} });
+  $('#connKey').textContent = key;
+  try { await navigator.clipboard.writeText(key); toast('New key made and copied'); } catch { toast('New key made'); }
+};
+$('#CONNECT_ENABLED').addEventListener('change', async (e) => {
+  if (e.target.checked && $('#connKey').textContent === 'none yet') $('#connNew').click();
+});
+
 let loadedSettings = null;
 async function loadSettings() {
   const s = loadedSettings = await api('/api/settings');
@@ -2054,6 +2101,7 @@ async function loadSettings() {
   $('#ALERT_USER_ID').value = s.ALERT_USER_ID || '';
   showUpdateStatus();
   loadCouncil(s);
+  loadConnections(s);
   const url = status?.site?.url;
   $('#siteHint').innerHTML = url && status.site.configured ? `Site: <a href="${esc(url)}" target="_blank" style="color:var(--accent2)">${esc(url)}</a>` : '';
   const w = $('#WHISPER_MODEL');
@@ -2093,6 +2141,9 @@ $('#saveBtn').addEventListener('click', async () => {
     GM_CHANNEL: $('#GM_CHANNEL').value.replace(/^#/, '').trim() || 'gm',
     GM_ROLE: $('#GM_ROLE').value.trim() || 'Game Master, GM, Storyteller, DM',
     ANTHROPIC_API_KEY: ai === 'claude' ? $('#ANTHROPIC_API_KEY').value : '',
+    CONNECT_ENABLED: $('#CONNECT_ENABLED').checked ? 'true' : 'false',
+    CONNECT_PORT: String(Number($('#CONNECT_PORT').value) || 3081),
+    CONNECT_LAN: $('#CONNECT_LAN').checked ? 'true' : 'false',
     COUNCIL_MEMBERS: JSON.stringify(councilRowsData()),
     COUNCIL_LABELS: $('#COUNCIL_LABELS').checked ? 'true' : 'false',
     COUNCIL_RECAP: $('#COUNCIL_RECAP').checked ? 'true' : 'false',

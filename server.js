@@ -1,6 +1,7 @@
 // Note Tiger manager: runs the control panel and starts/stops the bot (index.js) as a separate process.
 // If the bot crashes, the panel stays up, shows why, and can start it again.
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fork, exec } from 'node:child_process';
 import {
@@ -16,6 +17,9 @@ import { sendAlert, testAlert } from './alerts.js';
 import { campaignBook } from './book.js';
 import { recapSession, askArchive, ollamaStatus, refreshOllama, AI_LABEL, getProgress, askAI } from './ai.js';
 import { councilStatus, checkMember, parseMembers, machineOf } from './council.js';
+import { startConnections, connectSettings, newConnectKey, listRuns } from './ext.js';
+import { randomCharacter } from './builder.js';
+import { srdSpells } from './sheets.js';
 import {
   listCharacters, getCharacter, saveCharacter, deleteCharacter, importSheet, fillSheet, listTemplates, addTemplate, removeTemplate,
   mapTemplate, readTemplateMap, saveTemplateMap, characterHistory, KEY_GUIDE, ALL_KEYS, normalize, trackChange, CONDITIONS,
@@ -43,7 +47,7 @@ refreshCouncil();
 setInterval(refreshCouncil, 30_000).unref();
 import { startWeb } from './web.js';
 import { publishSite, siteStatus, siteConfigured } from './site.js';
-import { LIB_DIR, listBooks, syncLibrary, libraryProgress, addBook, removeBook, askBooks, renderPage, serverSetups, setServerSetup, bookCover, librarySystems, setBookSystem, renameSystem, setSystemCover } from './library.js';
+import { LIB_DIR, listBooks, syncLibrary, libraryProgress, addBook, removeBook, askBooks, renderPage, searchBooks, booksFor, serverSetups, setServerSetup, bookCover, librarySystems, setBookSystem, renameSystem, setSystemCover } from './library.js';
 
 const RESTART_CODE = 75; // the launcher restarts the manager when it exits with this code
 
@@ -151,6 +155,11 @@ function stopBot(timeoutMs = 60_000) {
 const safeGid = (gid) => { if (!/^\d+$/.test(gid)) throw new Error('Bad server id'); return gid; };
 const liveSessionId = (gid) => botStatus?.guilds?.find((g) => g.id === gid)?.recording?.sessionId;
 
+// This PC's network addresses, so another PC knows where to connect.
+function lanAddresses() {
+  return Object.values(os.networkInterfaces()).flat().filter((a) => a && a.family === 'IPv4' && !a.internal).map((a) => a.address);
+}
+
 function guildList() {
   const map = new Map(knownGuilds().map((g) => [g.id, { ...g, recording: null }]));
   for (const g of botStatus?.guilds ?? []) map.set(g.id, { id: g.id, name: g.name, recording: bot ? g.recording : null });
@@ -159,6 +168,13 @@ function guildList() {
 
 startWeb({
   councilStatus() { return refreshCouncil(); },
+  connectionInfo() {
+    const c = connectSettings();
+    return { ...c, key: c.key ? `${c.key.slice(0, 4)}…${c.key.slice(-4)}` : '', hasKey: Boolean(c.key), lanAddresses: lanAddresses() };
+  },
+  connectionKey() { return { key: connectSettings().key }; },
+  newConnectionKey() { return { key: newConnectKey() }; },
+  runs(gid) { return listRuns(gid); },
   // ---------- characters (D&D sheets) ----------
   characters(gid) { return { characters: listCharacters(gid), conditions: CONDITIONS, history: characterHistory(gid), sheets: listTemplates().filter((t) => t.mapped).map((t) => t.name) }; },
   saveCharacter(gid, body) { return saveCharacter(gid, body, { by: 'Note Tiger app', change: body.change || 'edited in the app' }); },
@@ -359,7 +375,53 @@ startWeb({
   serverBooks() { return { guilds: guildList().map(({ id, name }) => ({ id, name })), setups: serverSetups() }; },
   setServerBooks(gid, body) { return setServerSetup(gid, body); },
   renderPage(key, page) { return renderPage(key, page); },
-  reindexLibrary() { syncLibrary().catch((e) => console.error('[library]', e.message)); },
+  reindexLibrary() { syncLibrary().catch((e) => console.error('[library]', e.message));
+
+// ---------- connections: other programs (like the Dungeon Delve game) use Note Tiger through ext.js ----------
+startConnections({
+  info: () => ({ name: 'Note Tiger', version: CURRENT_VERSION, ai: AI_LABEL, servers: guildList().map(({ id, name }) => ({ id, name })) }),
+  servers: () => guildList().map(({ id, name }) => ({ id, name })),
+  defaultServer: () => guildList()[0]?.id || '',
+  randomCharacter(gid, b) {
+    const ch = randomCharacter({
+      edition: b.edition, level: b.level, cls: b.class || b.cls, species: b.species, background: b.background, name: b.name,
+      method: b.method, player: b.player || '', playerId: b.playerId || '',
+    });
+    if (b.save === false) return ch;
+    // A random suffix so two random characters with the same name don't overwrite each other.
+    const id = b.id || `${ch.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')}-${Math.random().toString(36).slice(2, 6)}`;
+    return saveCharacter(gid, { ...ch, tag: String(b.tag || 'pickup').slice(0, 30), id }, { by: b.source || 'connection', change: 'made at random' });
+  },
+  characters: (gid) => listCharacters(gid),
+  character: (gid, id) => getCharacter(gid, id),
+  saveCharacter: (gid, c) => saveCharacter(gid, c, { by: 'connection', change: 'saved by another program' }),
+  deleteCharacter: (gid, id) => deleteCharacter(gid, id, { by: 'connection' }),
+  track(gid, id, b) {
+    const c = getCharacter(gid, id);
+    if (!c) throw new Error('No such character.');
+    const { character, said } = trackChange(c, b.op, b);
+    return { character: saveCharacter(gid, { ...character, id }, { by: b.source || 'connection', change: said || b.op }), said };
+  },
+  pdf: async (gid, id, sheet) => {
+    const c = getCharacter(gid, id);
+    if (!c) throw new Error('No such character.');
+    const mapped = listTemplates().filter((t) => t.mapped);
+    const t = mapped.find((x) => x.name === sheet) || mapped[0];
+    if (!t) throw new Error('Add a blank sheet first (Library → Character sheets).');
+    return { pdf: await fillSheet(t.name, c), fileName: `${c.name} - ${t.name}.pdf` };
+  },
+  searchRules(query, gid, limit) {
+    const keys = gid ? new Set(booksFor(gid).map((b) => b.key)) : null;
+    const titles = new Map(listBooks().map((b) => [b.key, b.title]));
+    return searchBooks(query, Math.min(20, limit), keys).map((h) => ({ book: titles.get(h.book) || h.title, page: h.printed || h.page, pdfPage: h.page, text: h.text }));
+  },
+  askRules: async (question, gid) => {
+    const { answer, cited } = await askBooks(question, { gid });
+    return { answer, source: cited ? { book: cited.title, page: cited.printed || cited.page } : null };
+  },
+  spells: (edition, cls, level) => srdSpells(edition).filter((x) => (!cls || x.c.includes(cls)) && (level == null || level === '' || x.l === Number(level))),
+  askAI: (system, user, max) => askAI(system, user, max),
+}); },
   openLibraryFolder() {
     const cmd = process.platform === 'win32' ? `explorer "${LIB_DIR}"` : process.platform === 'darwin' ? `open "${LIB_DIR}"` : `xdg-open "${LIB_DIR}"`;
     exec(cmd, () => {});
@@ -414,6 +476,52 @@ startUpdateChecks();
 
 // Rulebooks: index anything new now, and whenever PDFs are added to or removed from the library folder.
 syncLibrary().catch((e) => console.error('[library]', e.message));
+
+// ---------- connections: other programs (like the Dungeon Delve game) use Note Tiger through ext.js ----------
+startConnections({
+  info: () => ({ name: 'Note Tiger', version: CURRENT_VERSION, ai: AI_LABEL, servers: guildList().map(({ id, name }) => ({ id, name })) }),
+  servers: () => guildList().map(({ id, name }) => ({ id, name })),
+  defaultServer: () => guildList()[0]?.id || '',
+  randomCharacter(gid, b) {
+    const ch = randomCharacter({
+      edition: b.edition, level: b.level, cls: b.class || b.cls, species: b.species, background: b.background, name: b.name,
+      method: b.method, player: b.player || '', playerId: b.playerId || '',
+    });
+    if (b.save === false) return ch;
+    // A random suffix so two random characters with the same name don't overwrite each other.
+    const id = b.id || `${ch.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')}-${Math.random().toString(36).slice(2, 6)}`;
+    return saveCharacter(gid, { ...ch, tag: String(b.tag || 'pickup').slice(0, 30), id }, { by: b.source || 'connection', change: 'made at random' });
+  },
+  characters: (gid) => listCharacters(gid),
+  character: (gid, id) => getCharacter(gid, id),
+  saveCharacter: (gid, c) => saveCharacter(gid, c, { by: 'connection', change: 'saved by another program' }),
+  deleteCharacter: (gid, id) => deleteCharacter(gid, id, { by: 'connection' }),
+  track(gid, id, b) {
+    const c = getCharacter(gid, id);
+    if (!c) throw new Error('No such character.');
+    const { character, said } = trackChange(c, b.op, b);
+    return { character: saveCharacter(gid, { ...character, id }, { by: b.source || 'connection', change: said || b.op }), said };
+  },
+  pdf: async (gid, id, sheet) => {
+    const c = getCharacter(gid, id);
+    if (!c) throw new Error('No such character.');
+    const mapped = listTemplates().filter((t) => t.mapped);
+    const t = mapped.find((x) => x.name === sheet) || mapped[0];
+    if (!t) throw new Error('Add a blank sheet first (Library → Character sheets).');
+    return { pdf: await fillSheet(t.name, c), fileName: `${c.name} - ${t.name}.pdf` };
+  },
+  searchRules(query, gid, limit) {
+    const keys = gid ? new Set(booksFor(gid).map((b) => b.key)) : null;
+    const titles = new Map(listBooks().map((b) => [b.key, b.title]));
+    return searchBooks(query, Math.min(20, limit), keys).map((h) => ({ book: titles.get(h.book) || h.title, page: h.printed || h.page, pdfPage: h.page, text: h.text }));
+  },
+  askRules: async (question, gid) => {
+    const { answer, cited } = await askBooks(question, { gid });
+    return { answer, source: cited ? { book: cited.title, page: cited.printed || cited.page } : null };
+  },
+  spells: (edition, cls, level) => srdSpells(edition).filter((x) => (!cls || x.c.includes(cls)) && (level == null || level === '' || x.l === Number(level))),
+  askAI: (system, user, max) => askAI(system, user, max),
+});
 let libTimer = null;
 try {
   fs.watch(LIB_DIR, () => { clearTimeout(libTimer); libTimer = setTimeout(() => syncLibrary().catch(() => {}), 3000); });

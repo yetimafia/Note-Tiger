@@ -140,6 +140,26 @@ Mistral Nemo 12B, Phi-4 14B) so their mistakes don't line up.
 To compare one AI with the council on a past session, run **compare-council.bat** in the app folder (it works on a
 copy; nothing is changed). The report is in `logs\council-compare\report.txt`.
 
+## Connecting other programs
+
+Other programs (like the **Dungeon Delve** pickup-game app) can use Note Tiger through a small API. Turn it on in
+**Settings → Connections**, which makes a key. Every request sends it as `Authorization: Bearer <key>`.
+Address: `http://localhost:3081/v1` (or `http://<this PC>:3081/v1` with "Allow other PCs" on). Add `server=<Discord server id>`
+to pick a server; without it, the first one is used.
+
+| What | Request |
+|---|---|
+| About Note Tiger, its servers | `GET /v1/info`, `GET /v1/servers` |
+| Random characters (saved, shown in the Party tab) | `POST /v1/characters/random` `{ "count": 4, "level": 3, "edition": "2024", "class": "Wizard", "tag": "dungeon" }` |
+| List / get / save / delete characters | `GET /v1/characters?tag=dungeon`, `GET /v1/characters/<id>`, `POST /v1/characters`, `PUT /v1/characters/<id>`, `DELETE /v1/characters/<id>` |
+| Damage, heal, slots, conditions, rests | `POST /v1/characters/<id>/track` `{ "op": "damage", "amount": 7 }` (ops: damage, heal, temp, setHp, slot, hitDie, setHitDice, death, condition, exhaustion, inspiration, concentration, money, shortRest, longRest) |
+| A filled-in PDF sheet | `GET /v1/characters/<id>/pdf?sheet=<sheet name>` |
+| Search the rulebooks / ask a rules question | `GET /v1/rules/search?q=grapple`, `POST /v1/rules/ask` `{ "question": "How does grappling work?" }` |
+| SRD spell lists | `GET /v1/rules/spells?edition=2024&class=Wizard&level=1` |
+| Recap a run (written by the AI, posted to #recaps) | `POST /v1/runs` `{ "title": "...", "outcome": "...", "party": ["..."], "events": ["...", "..."] }` then `GET /v1/runs/<id>` until `status` is `done` |
+
+Runs are saved in `data/<server>/runs/`, not with recorded sessions.
+
 ## Troubleshooting
 
 | Problem | Fix |
