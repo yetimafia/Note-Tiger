@@ -1,5 +1,6 @@
-**New in 2.10.1: scanned rulebooks work now**
-- 📷 Some PDFs are just pictures of pages, with no text behind them, so `/game ask` couldn't search them. Note Tiger now reads those pictures with free text recognition that runs on your PC. It takes a few seconds a page (roughly 10 to 20 minutes per book, once) and runs after your other books. The Library tab shows its progress, and it picks up where it left off after a restart.
-- Books you already added are handled automatically.
+**New in 2.11.0: build a D&D character in Discord**
+- 🧙 `/sheet build` (optional `level:` and `rules:` 2014 or 2024) walks you through making a character with menus that only you see: class and subclass, species (and subrace or lineage), background, ability scores (standard array, point buy, a 🎲 roll, or your own), skills and expertise, ability increases or feats, armor and weapons, then name, personality, spells and gear.
+- Note Tiger works out HP, AC, attacks, saves, skills, spell slots, how many spells to pick, and your features up to your level.
+- Save it, then `/sheet pdf` puts it on a filled-in sheet. It replaces your old character if you had one (you're warned first).
 
 Your settings, sessions and rulebooks are kept when you update.

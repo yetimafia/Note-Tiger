@@ -45,6 +45,7 @@ import {
   importSheet, saveCharacter, findCharacter, listCharacters, deleteCharacter, sheetSummary, sheetForAI, fillSheet, listTemplates,
   ASK_SYSTEM as SHEET_ASK_SYSTEM,
 } from './sheets.js';
+import { startBuilder, handleBuilder } from './builder.js';
 import { sendAlert } from './alerts.js';
 import { SITE_PASSWORD, SITE_SHARE_PASSWORD, LIB_PAGE_IMAGES, USE_CLAUDE, GM_CHANNEL, PREP_ENABLED, GAME_DAY, GAME_TIME, PREP_HOURS } from './config.js';
 
@@ -578,6 +579,9 @@ const commands = [
     .addSubcommand((c) => c.setName('ask').setDescription('Ask about your character ("what\'s my stealth bonus?")')
       .addStringOption((o) => o.setName('question').setDescription('Your question').setRequired(true))
       .addUserOption((o) => o.setName('player').setDescription('Whose character (default: yours)')))
+    .addSubcommand((c) => c.setName('build').setDescription('Make a new character step by step (only you see it)')
+      .addIntegerOption((o) => o.setName('level').setDescription('Starting level (default 1)').setMinValue(1).setMaxValue(20))
+      .addStringOption((o) => o.setName('rules').setDescription('Which Player\'s Handbook').addChoices({ name: '2014', value: '2014' }, { name: '2024', value: '2024' })))
     .addSubcommand((c) => c.setName('list').setDescription('Everyone\'s characters on this server'))
     .addSubcommand((c) => c.setName('remove').setDescription('Remove your character from Note Tiger')),
   new SlashCommandBuilder().setName('help').setDescription('List all my commands and what they do')
@@ -647,6 +651,27 @@ async function pagePicture(book, pdfPage) {
 
 client.on('interactionCreate', async (interaction) => {
   // Page-turn buttons under a rulebook picture: swap the picture for the page before or after.
+  // The character builder's buttons, menus and forms.
+  if ((interaction.isButton() || interaction.isStringSelectMenu() || interaction.isModalSubmit()) && interaction.customId.startsWith('sb|')) {
+    try {
+      return await handleBuilder(interaction, {
+        onSave: async (ch) => {
+          const gid = interaction.guildId;
+          const existing = findCharacter(gid, { userId: interaction.user.id });
+          const saved = saveCharacter(gid, { ...ch, id: existing?.id, playerId: interaction.user.id }, { by: interaction.user.username, change: 'made with /sheet build' });
+          const st = getSettings(gid);
+          st.characters[interaction.user.id] = saved.name;
+          saveSettings(gid, st);
+          console.log(`[sheets] ${interaction.user.username} built ${saved.name} (${ch.classes[0]?.name} ${ch.classes[0]?.level})`);
+          return saved;
+        },
+      });
+    } catch (err) {
+      console.error('[builder]', err);
+      const msg = { content: `Something went wrong in the builder: ${err.message}`, flags: MessageFlags.Ephemeral };
+      return (interaction.replied || interaction.deferred ? interaction.followUp(msg) : interaction.reply(msg)).catch(() => {});
+    }
+  }
   if (interaction.isButton() && interaction.customId.startsWith('pg|')) {
     const [, book, page] = interaction.customId.split('|');
     try {
@@ -772,6 +797,15 @@ client.on('interactionCreate', async (interaction) => {
         console.log(`[sheets] ${interaction.user.username} imported ${saved.name} for ${player.username} via ${how}`);
         return interaction.editReply(`✅ Imported **${saved.name}** from ${how}${existing ? ' (replaced the old one)' : ''}.\n` +
           `Check it with \`/sheet show\`. Something wrong? Fix it in the Note Tiger app → Campaign → Characters.\n\n${sheetSummary(saved, { short: true })}`);
+      }
+
+      if (sub === 'build') {
+        const existing = findCharacter(gid, { userId: interaction.user.id });
+        const member = interaction.member;
+        return startBuilder(interaction, {
+          level: interaction.options.getInteger('level') || 1, edition: interaction.options.getString('rules'),
+          playerName: member?.displayName || interaction.user.username, replaces: existing?.name || null,
+        });
       }
 
       if (sub === 'list') {

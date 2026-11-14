@@ -1,6 +1,6 @@
 {
   "name": "note-tiger",
-  "version": "2.10.1",
+  "version": "2.11.0",
   "description": "Discord bot that listens to your tabletop RPG sessions, writes recaps, and answers questions about the campaign. Includes a local control panel.",
   "main": "server.js",
   "type": "module",
