@@ -26,6 +26,7 @@ echo "==> App files"
 cp server.js index.js config.js store.js ai.js site.js library.js campaign.js spelling.js backup.js updater.js squirrel.js voices.js alerts.js book.js council.js sheets.js builder.js rules5e.js compare-council.mjs compare-council.bat web.js ui.html tiger.png package.json package-lock.json test-speech.js setup-local-ai.bat .env.example "$STAGE/app/"
 cp -r site "$STAGE/app/site"
 cp -r fonts "$STAGE/app/fonts"
+cp -r data-rules "$STAGE/app/data-rules"
 
 echo "==> Windows packages"
 (cd "$STAGE/app" && npm ci --os=win32 --cpu=x64 --ignore-scripts --omit=dev --no-audit --no-fund --loglevel=error)

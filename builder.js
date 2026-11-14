@@ -6,7 +6,7 @@ import {
 import {
   CLASSES, SPECIES, BACKGROUNDS, ARMOR, WEAPONS, WEAPON_2024, ALL_SKILLS, ABILITY_LIST, spellSlots, asiLevels,
 } from './rules5e.js';
-import { normalize, skillLabel, ABILITY_NAMES, signed, mod, profBonusFor, sheetSummary } from './sheets.js';
+import { normalize, skillLabel, ABILITY_NAMES, signed, mod, profBonusFor, sheetSummary, srdSpells } from './sheets.js';
 
 const UP = (a) => a.toUpperCase();
 const STANDARD_ARRAY = [15, 14, 13, 12, 10, 8];
@@ -29,8 +29,20 @@ function speciesData(s) {
     extraLanguages: (base.extraLanguages || 0) + (sub.extraLanguages || 0),
     hpPerLevel: (base.hpPerLevel || 0) + (sub.hpPerLevel || 0),
     armor: sub.armor || '',
+    size: ['Halfling', 'Gnome'].includes(s.species) ? 'Small' : 'Medium',
   };
 }
+
+// The spells a class can pick, by level (SRD lists), and the highest level it can cast at this character level.
+export function classSpells(s, level) {
+  return srdSpells(s.edition).filter((x) => x.l === level && x.c.includes(s.cls)).sort((a, b) => a.n.localeCompare(b.n));
+}
+export function maxSpellLevel(s) {
+  const slots = Object.keys(spellSlots(s.cls, s.level, s.edition)).map(Number);
+  return slots.length ? Math.max(...slots) : 0;
+}
+const castsSpells = (s) => Boolean(CLASSES[s.cls]?.ability) && (maxSpellLevel(s) > 0 || (CLASSES[s.cls].cantrips || [0])[0] > 0);
+const spellDesc = (x) => [x.t, x.r, x.v.split('').join(', '), x.co && 'Concentration', x.ri && 'Ritual'].filter(Boolean).join(' · ');
 
 export function finalScores(s) {
   const sp = speciesData(s) || { asi: {} };
@@ -103,7 +115,9 @@ export function buildCharacter(s) {
     const abil = ranged ? 'dex' : (props.includes('f') || monkWeapon) ? (m.dex > m.str ? 'dex' : 'str') : 'str';
     const bonus = m[abil] + (weaponProficient(s.cls, ed, name, group, props) ? pb : 0);
     const vers = props.match(/v(\d+d\d+)/);
-    attacks.push({ name, bonus: signed(bonus), damage: `${die}${m[abil] ? signed(m[abil]) : ''} ${type}${vers ? ` (${vers[1]} two-handed)` : ''}` });
+    const notes = [props.includes('f') && 'Finesse', props.includes('l') && 'Light', props.includes('t') && 'Thrown', props.includes('2') && 'Two-handed',
+      vers && `Versatile (${vers[1]})`, ranged && 'Ranged'].filter(Boolean).join(', ');
+    attacks.push({ name, bonus: signed(bonus), damage: `${die}${m[abil] ? signed(m[abil]) : ''} ${type}`, notes });
   }
 
   // Spells.
@@ -113,7 +127,11 @@ export function buildCharacter(s) {
     const mm = x.match(/^(.+?)\s*\((?:level\s*)?(\d)\)$/i);
     return mm ? { name: mm[1].trim(), level: Number(mm[2]), prepared: true } : { name: x, level: defLevel, prepared: defLevel > 0 };
   });
-  spellcasting.spells = [...parseSpells(s.cantrips, 0), ...parseSpells(s.spells, 1)];
+  const picked = Object.entries(s.spellPicks || {}).map(([n, l]) => {
+    const info = srdSpells(ed).find((x) => x.n === n) || {};
+    return { name: n, level: l, prepared: l > 0, time: info.t || '', range: info.r || '' };
+  });
+  spellcasting.spells = [...picked, ...parseSpells(s.cantrips, 0), ...parseSpells(s.spells, 1)];
 
   // Features: species traits, background feature or feat, class features up to this level.
   const subName = s.subclass || '';
@@ -160,6 +178,7 @@ export function buildCharacter(s) {
   return normalize({
     name: s.name || 'Unnamed', player: s.player || '', playerId: s.playerId || '', edition: ed,
     classes: [{ name: s.cls, subclass: subName, level: lvl }],
+    size: sp?.size || 'Medium',
     species: s.subspecies && s.subspecies !== s.species && !/lineage|legacy/.test(s.subspecies) ? s.subspecies : [s.species, /lineage|legacy/.test(s.subspecies || '') ? `(${s.subspecies})` : ''].filter(Boolean).join(' '),
     background: s.background, alignment: s.alignment || '', xp: null,
     abilities: sc, saves: Object.fromEntries(c.saves.map((a) => [a, { prof: true }])), skills,
@@ -215,13 +234,14 @@ function expertiseCount(s) {
 }
 const asiCount = (s) => asiLevels(s.cls, s.edition).filter((l) => l <= s.level).length;
 
-const STEPS = ['edition', 'class', 'species', 'background', 'method', 'assign', 'skills', 'expertise', 'asi', 'gear', 'details', 'review'];
+const STEPS = ['edition', 'class', 'species', 'background', 'method', 'assign', 'skills', 'expertise', 'asi', 'gear', 'spells', 'details', 'review'];
 function nextStep(s, from) {
   let i = STEPS.indexOf(from) + 1;
   while (i < STEPS.length) {
     const st = STEPS[i];
     if (st === 'expertise' && !expertiseCount(s)) { i++; continue; }
     if (st === 'asi' && !asiCount(s)) { i++; continue; }
+    if (st === 'spells' && !castsSpells(s)) { i++; continue; }
     return st;
   }
   return 'review';
@@ -355,10 +375,44 @@ function view(s) {
     rows.push(row(select(id('weap', 'simple'), 'Simple weapons (up to 3)', wopts('simple'), { min: 0, max: 3 })));
     rows.push(row(select(id('weap', 'martial'), 'Martial weapons (up to 3)', wopts('martial'), { min: 0, max: 3 })));
     rows.push(nav(Boolean(s.armor) && s.shield !== undefined));
+  } else if (s.step === 'spells') {
+    const sc = spellCounts(s);
+    const maxL = maxSpellLevel(s);
+    const picks = s.spellPicks || {};
+    const nC = Object.values(picks).filter((l) => l === 0).length;
+    const nS = Object.values(picks).filter((l) => l > 0).length;
+    const lv = s.spellLevel ?? (sc.cantrips ? 0 : 1);
+    const all = classSpells(s, lv);
+    const page = Math.min(s.spellPage || 0, Math.max(0, Math.ceil(all.length / 25) - 1));
+    const shown = all.slice(page * 25, page * 25 + 25);
+    text += `✨ **Spells.** Pick **${sc.cantrips} cantrips** (${nC} picked) and **${sc.spells} spells ${sc.word}** (${nS} picked)${maxL ? `, up to level ${maxL}` : ''}.`;
+    if (sc.wizardBook) text += ' Wizards: these are the spells you have prepared; add the rest of your spellbook at the end.';
+    const byL = {};
+    for (const [n, l] of Object.entries(picks)) (byL[l] ||= []).push(n);
+    const listed = Object.keys(byL).sort().map((l) => `${l === '0' ? 'Cantrips' : `Level ${l}`}: ${byL[l].sort().join(', ')}`).join('\n');
+    if (listed) text += `\n${listed}`;
+    if (nC > sc.cantrips || nS > sc.spells) text += '\n⚠️ That\'s more than you get; remove some.';
+    text += `\n*Spells from the free rules (SRD). Spells from your other books can be typed in at the end.*`;
+    const levels = [...(sc.cantrips ? [0] : []), ...Array.from({ length: maxL }, (_, k) => k + 1)];
+    rows.push(row(select(id('pick', 'spellLevel'), lv ? `Level ${lv} spells` : 'Cantrips', levels.map((l) => ({
+      label: l ? `Level ${l} spells` : 'Cantrips', value: String(l), default: l === lv, description: `${classSpells(s, l).length} to choose from`,
+    })))));
+    if (shown.length) {
+      rows.push(row(select(id('spells', String(lv), String(page)), `${lv ? `Level ${lv}` : 'Cantrips'}${all.length > 25 ? ` (${page * 25 + 1}–${page * 25 + shown.length} of ${all.length})` : ''}: pick any`,
+        shown.map((x) => ({ label: x.n, value: x.n, description: spellDesc(x), default: picks[x.n] !== undefined })), { min: 0, max: shown.length })));
+    }
+    if (all.length > 25) {
+      rows.push(row(btn(id('spellpage', String(page - 1)), '◀ Previous', ButtonStyle.Secondary, page === 0),
+        btn(id('spellpage', String(page + 1)), 'More ▶', ButtonStyle.Secondary, (page + 1) * 25 >= all.length)));
+    }
+    rows.push(nav(true));
   } else if (s.step === 'details') {
     const sc = spellCounts(s);
     text += `Last bit: **who is this character?**${s.name ? `\n✅ ${s.name}` : ''}${s.extrasDone ? '\n✅ Spells, feats & gear' : ''}`;
-    if (sc) text += `\n\n✨ Spells to choose from your book: **${sc.cantrips} cantrips** and **${sc.spells} spells ${sc.word}**${sc.wizardBook ? ' (plus your spellbook)' : ''}.`;
+    if (sc) {
+      const n = Object.keys(s.spellPicks || {}).length;
+      text += `\n\n✨ ${n} spell${n === 1 ? '' : 's'} picked from the lists. Spells from your other books${sc.wizardBook ? ' (or the rest of your spellbook)' : ''} go in **🎒 Spells, feats & gear**.`;
+    }
     const feats = (s.asis || []).filter((x) => x?.kind === 'feat').length + (speciesData(s)?.feats || 0);
     if (feats) text += `\n⭐ Feats to name: **${feats}**${ed === '2024' ? ` (your background's ${BACKGROUNDS[ed][s.background].feat} is already added)` : ''}.`;
     rows.push(row(btn(id('modal', 'who'), '✍️ Name & personality', s.name ? ButtonStyle.Secondary : ButtonStyle.Primary),
@@ -398,12 +452,13 @@ export async function handleBuilder(interaction, { onSave }) {
   if (action === 'ed') { s.edition = arg; s.step = 'class'; }
   if (action === 'pick') {
     const v = values[0];
-    if (arg === 'cls') { s.cls = v; s.subclass = null; s.classSkills = []; s.expertise = []; s.asis = []; }
+    if (arg === 'cls') { s.cls = v; s.subclass = null; s.classSkills = []; s.expertise = []; s.asis = []; s.spellPicks = {}; s.spellLevel = null; }
     else if (arg === 'species') { s.species = v; s.subspecies = null; s.speciesPick = []; s.anySkills = []; }
     else if (arg === 'subspecies') { s.subspecies = v; s.speciesPick = []; s.anySkills = []; }
     else if (arg === 'background') { s.background = v; s.bgBonus = null; s.classSkills = []; }
     else if (arg === 'bgBonus') s.bgBonus = Object.fromEntries(v.split(',').map((x) => { const [a, n] = x.split(':'); return [a, Number(n)]; }));
     else if (arg === 'shield') s.shield = v === 'yes';
+    else if (arg === 'spellLevel') { s.spellLevel = Number(v); s.spellPage = 0; }
     else s[arg] = v;
   }
   if (action === 'multi') s[arg] = values;
@@ -429,6 +484,15 @@ export async function handleBuilder(interaction, { onSave }) {
     s.asis[Number(arg)] = v === 'feat' ? { kind: 'feat' } : v.startsWith('two:') ? { kind: 'two', a: v.slice(4) } : { kind: 'split', a: v.split(':')[1], b: v.split(':')[2] };
   }
   if (action === 'asipage') s.asiPage = Number(arg);
+  if (action === 'spells') {
+    // This menu shows one page of one spell level: swap that page's picks for what's ticked now.
+    const lv = Number(arg);
+    const page = Number(arg2) || 0;
+    const onPage = new Set(classSpells(s, lv).slice(page * 25, page * 25 + 25).map((x) => x.n));
+    s.spellPicks = Object.fromEntries(Object.entries(s.spellPicks || {}).filter(([n]) => !onPage.has(n)));
+    for (const n of values) s.spellPicks[n] = lv;
+  }
+  if (action === 'spellpage') s.spellPage = Math.max(0, Number(arg));
   if (action === 'next') s.step = nextStep(s, arg);
   if (action === 'back') s.step = arg;
 
@@ -447,8 +511,8 @@ export async function handleBuilder(interaction, { onSave }) {
     const sc = spellCounts(s);
     const m = new ModalBuilder().setCustomId(id('form', 'extras')).setTitle('Spells, feats & gear');
     if (sc) {
-      m.addComponents(row(new TextInputBuilder().setCustomId('cantrips').setLabel(`Cantrips (${sc.cantrips}), comma-separated`).setStyle(TextInputStyle.Paragraph).setRequired(false).setMaxLength(500).setValue(s.cantrips || '')));
-      m.addComponents(row(new TextInputBuilder().setCustomId('spells').setLabel(`Spells (${sc.spells}). Add the level: Fireball (3)`).setStyle(TextInputStyle.Paragraph).setRequired(false).setMaxLength(1500).setValue(s.spells || '')));
+      m.addComponents(row(new TextInputBuilder().setCustomId('spells').setLabel('Other spells, not in the lists. Fireball (3)').setStyle(TextInputStyle.Paragraph)
+        .setRequired(false).setMaxLength(1500).setPlaceholder('Toll the Dead (0), Silvery Barbs (1), Shadow Blade (2)').setValue(s.spells || '')));
     }
     m.addComponents(row(new TextInputBuilder().setCustomId('feats').setLabel('Feats (comma-separated)').setStyle(TextInputStyle.Short).setRequired(false).setMaxLength(300).setValue(s.feats || '')));
     m.addComponents(row(new TextInputBuilder().setCustomId('gear').setLabel('Other gear (comma-separated)').setStyle(TextInputStyle.Paragraph).setRequired(false).setMaxLength(1000).setPlaceholder('Explorer\'s pack, rope (50 ft), 2 potions of healing').setValue(s.gear || '')));
@@ -462,7 +526,7 @@ export async function handleBuilder(interaction, { onSave }) {
       const [i1, b1, f1] = (f('ibf') || '').split('\n');
       s.ideals = (i1 || '').trim(); s.bonds = (b1 || '').trim(); s.flaws = (f1 || '').trim();
     } else {
-      for (const k of ['cantrips', 'spells', 'feats', 'gear']) { const v = f(k); if (v !== undefined) s[k] = v; }
+      for (const k of ['spells', 'feats', 'gear']) { const v = f(k); if (v !== undefined) s[k] = v; }
       const g = Number(String(f('gold') || '').replace(/[^\d.]/g, ''));
       s.gold = Number.isFinite(g) ? g : 0;
       s.extrasDone = true;
@@ -474,6 +538,5 @@ export async function handleBuilder(interaction, { onSave }) {
     sessions.delete(interaction.user.id);
     return interaction.update({ content: `✅ **${saved.name}** is saved! \`/sheet show\` to see it, \`/sheet pdf\` for a filled-in sheet.\n\n${sheetSummary(saved, { short: true })}`, components: [] });
   }
-  void arg2;
   return interaction.update(view(s));
 }

@@ -1811,7 +1811,7 @@ async function loadSheets() {
   $('#sheetList').innerHTML = data.sheets.map((t) => {
     const m = t.matching;
     const status = m?.running ? `⏳ Matching boxes… ${m.total ? `${m.done} of ${m.total}` : ''}`
-      : m?.error ? `⚠️ ${esc(m.error)}` : t.mapped ? `✓ ${t.matched} of ${t.boxes} boxes in use${t.mappedBy === 'edited' ? ' (fixed by hand)' : ''}` : 'Not matched yet';
+      : m?.error ? `⚠️ ${esc(m.error)}` : t.mapped ? `✓ ${t.matched} of ${t.boxes} boxes in use${t.mappedBy === 'edited' ? ' (fixed by hand)' : t.mappedBy === 'built-in' ? ' (Note Tiger knows this sheet)' : ''}` : 'Not matched yet';
     return `<div class="sheetrow" data-name="${esc(t.name)}"><b>${esc(t.name)}</b><span class="hint">${status}</span><span style="flex:1"></span>
       ${t.mapped ? `<button class="btn ghost s-test">Test fill</button><button class="btn ghost s-fix">Fix boxes</button>` : ''}
       <button class="btn ghost s-match"${m?.running ? ' disabled' : ''}>${t.mapped ? 'Re-match' : 'Match boxes'}</button><button class="btn ghost s-del" title="Remove">🗑</button></div>`;

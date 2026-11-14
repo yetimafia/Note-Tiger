@@ -1,6 +1,7 @@
-**New in 2.11.0: build a D&D character in Discord**
-- 🧙 `/sheet build` (optional `level:` and `rules:` 2014 or 2024) walks you through making a character with menus that only you see: class and subclass, species (and subrace or lineage), background, ability scores (standard array, point buy, a 🎲 roll, or your own), skills and expertise, ability increases or feats, armor and weapons, then name, personality, spells and gear.
-- Note Tiger works out HP, AC, attacks, saves, skills, spell slots, how many spells to pick, and your features up to your level.
-- Save it, then `/sheet pdf` puts it on a filled-in sheet. It replaces your old character if you had one (you're warned first).
+**New in 2.11.1: better character sheets and spell picking**
+- 📄 Note Tiger now knows the official **2024 character sheet** box by box. Every section gets filled: class features, species traits, feats, armor training, weapon and tool proficiencies, size, equipment, coins, alignment, languages, backstory and personality, and the full spell table (level, casting time, range, C/R/M and components). It switches over automatically if you already added that sheet.
+- Text shrinks to fit narrow boxes, and unticked checkboxes no longer show an X.
+- ✨ `/sheet build` has a **spell step**: menus with every spell your class can pick at each level (from the free rules), showing casting time, range and components, with how many you get. Spells from your other books can still be typed in.
+- Weapons get notes (finesse, light, thrown, versatile…), and characters get a size.
 
 Your settings, sessions and rulebooks are kept when you update.

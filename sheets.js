@@ -9,10 +9,23 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
-import { PDFDocument, PDFCheckBox, PDFTextField, PDFDropdown, PDFRadioGroup } from 'pdf-lib';
+import { fileURLToPath } from 'node:url';
+import { PDFDocument, PDFCheckBox, PDFTextField, PDFDropdown, PDFRadioGroup, StandardFonts } from 'pdf-lib';
 import { DATA_DIR, APP_DIR } from './config.js';
 
 const require = createRequire(import.meta.url);
+const RULES_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), 'data-rules');
+const readRules = (f) => { try { return JSON.parse(fs.readFileSync(path.join(RULES_DIR, f), 'utf8')); } catch { return null; } };
+// SRD spells (name, level, classes, casting time, range, components) for both rule sets.
+let spellData = null;
+export function srdSpells(edition) {
+  if (!spellData) spellData = readRules('spells-srd.json') || { 2014: [], 2024: [] };
+  return spellData[edition === '2014' ? '2014' : '2024'] || [];
+}
+export function findSpell(name, edition) {
+  const n = String(name).toLowerCase().trim();
+  return srdSpells(edition).find((x) => x.n.toLowerCase() === n) || srdSpells(edition === '2014' ? '2024' : '2014').find((x) => x.n.toLowerCase() === n) || null;
+}
 // Same folder as the rulebook library (library.js), named here so sheets.js doesn't import it (that would be a loop).
 export const SHEETS_DIR = path.join(APP_DIR, 'library', 'sheets');
 fs.mkdirSync(SHEETS_DIR, { recursive: true });
@@ -39,7 +52,7 @@ export const profBonusFor = (level) => 2 + Math.floor((Math.max(1, level || 1) -
 
 export function blankCharacter() {
   return {
-    name: '', player: '', playerId: '', edition: '', classes: [], species: '', background: '', alignment: '', xp: null,
+    name: '', player: '', playerId: '', edition: '', classes: [], species: '', size: '', background: '', alignment: '', xp: null,
     abilities: Object.fromEntries(ABILITIES.map((a) => [a, null])),
     saves: Object.fromEntries(ABILITIES.map((a) => [a, { prof: false }])),
     skills: Object.fromEntries(Object.keys(SKILLS).map((s) => [s, { prof: false, expertise: false }])),
@@ -84,10 +97,11 @@ export function normalize(c) {
       .filter(([l, v]) => Number(l) >= 1 && Number(l) <= 9 && v.max > 0)),
     spells: (Array.isArray(sc.spells) ? sc.spells : []).map((s) => (typeof s === 'string' ? { name: s.trim(), level: 0, prepared: false } : {
       name: str(s?.name), level: Math.max(0, Math.min(9, num(s?.level) || 0)), prepared: Boolean(s?.prepared),
+      ...(s?.time ? { time: str(s.time) } : {}), ...(s?.range ? { range: str(s.range) } : {}), ...(s?.notes ? { notes: str(s.notes) } : {}),
     })).filter((s) => s.name),
   };
   out.personality = Object.fromEntries(['traits', 'ideals', 'bonds', 'flaws'].map((k) => [k, str(out.personality?.[k])]));
-  for (const k of ['player', 'playerId', 'edition', 'species', 'background', 'alignment', 'speed', 'hitDice', 'proficiencies', 'languages', 'appearance', 'backstory', 'notes']) out[k] = str(out[k]);
+  for (const k of ['player', 'playerId', 'edition', 'species', 'size', 'background', 'alignment', 'speed', 'hitDice', 'proficiencies', 'languages', 'appearance', 'backstory', 'notes']) out[k] = str(out[k]);
   out.inspiration = Boolean(out.inspiration);
   return out;
 }
@@ -151,6 +165,46 @@ export function fillValues(c) {
     v[`slots_${l}`] = s ? String(s.max) : '';
     v[`slots_used_${l}`] = s && s.used ? String(s.used) : '';
   }
+  // Boxes the 2024 sheet has: size, notes per attack, features split by kind, proficiency checkboxes, one spell table.
+  v.size = c.size || '';
+  v.subclass = c.classes.map((k) => k.subclass).filter(Boolean).join(' / ');
+  c.attacks.slice(0, 6).forEach((a, i) => { v[`attack${i + 1}_notes`] = a.notes || ''; });
+  const kind = (f) => (/\btrait$/i.test(f.text) ? 'species' : /\bfeat\b/i.test(f.text) ? 'feat' : 'class');
+  const line = (f) => (f.text && !/^(.+ trait|feat|origin feat.*|.+ \d+|level \d+|.+ background feature)$/i.test(f.text) ? `${f.name}: ${f.text}` : f.name);
+  const cls = c.features.filter((f) => kind(f) === 'class').map(line);
+  const half = Math.ceil(cls.length / 2);
+  v.features_class = cls.join('\n');
+  v.features_class_1 = cls.slice(0, half).join('\n');
+  v.features_class_2 = cls.slice(half).join('\n');
+  v.features_species = c.features.filter((f) => kind(f) === 'species').map(line).join('\n');
+  v.feats = c.features.filter((f) => kind(f) === 'feat').map(line).join('\n');
+  const profLine = (label) => (c.proficiencies.split('\n').find((l) => l.toLowerCase().startsWith(label)) || '').replace(/^[^:]+:\s*/, '');
+  const armorText = profLine('armor').toLowerCase();
+  v.weapon_profs = profLine('weapons').replace(/^simple\b/i, 'Simple').replace(/(^|, )simple(?=,|$)/gi, '$1Simple weapons').replace(/(^|, )martial(?=,|$)/gi, '$1Martial weapons');
+  v.tool_profs = profLine('tools');
+  v.armor_light = /light|all armor/.test(armorText);
+  v.armor_medium = /medium|all armor/.test(armorText);
+  v.armor_heavy = /heavy|all armor/.test(armorText);
+  v.armor_shields = /shield/.test(armorText);
+  v.shield = c.inventory.some((i) => /^shield$/i.test(i.name));
+  v.spell_mod = c.spellcasting.ability ? signed(d.mod[c.spellcasting.ability]) : '';
+  v.backstory_personality = [
+    c.personality.traits && `Personality: ${c.personality.traits}`, c.personality.ideals && `Ideals: ${c.personality.ideals}`,
+    c.personality.bonds && `Bonds: ${c.personality.bonds}`, c.personality.flaws && `Flaws: ${c.personality.flaws}`, c.backstory,
+  ].filter(Boolean).join('\n');
+  // The spell table, cantrips first; casting time, range and C/R/M come from the SRD when the spell is in it.
+  [...c.spellcasting.spells].sort((a, b) => a.level - b.level || a.name.localeCompare(b.name)).slice(0, 30).forEach((sp, i) => {
+    const info = findSpell(sp.name, c.edition) || {};
+    const n = i + 1;
+    v[`spellrow_${n}_level`] = sp.level ? String(sp.level) : 'C';
+    v[`spellrow_${n}_name`] = sp.name;
+    v[`spellrow_${n}_time`] = shortTime(sp.time || info.t || '');
+    v[`spellrow_${n}_range`] = shortRange(sp.range || info.r || '');
+    v[`spellrow_${n}_notes`] = sp.notes || (info.v ? info.v.split('').join(', ') : '');
+    v[`spellrow_${n}_c`] = Boolean(info.co);
+    v[`spellrow_${n}_r`] = Boolean(info.ri);
+    v[`spellrow_${n}_m`] = Boolean(info.v && info.v.includes('M'));
+  });
   for (let l = 0; l <= 9; l++) {
     c.spellcasting.spells.filter((s) => s.level === l).slice(0, 13).forEach((s, i) => {
       v[`spell_${l}_${i + 1}`] = s.name;
@@ -173,9 +227,18 @@ traits, ideals, bonds, flaws: personality boxes | appearance | backstory | notes
 spell_class: spellcasting class | spell_ability | spell_dc: spell save DC | spell_attack: spell attack bonus
 slots_1 … slots_9: spell slots total per level | slots_used_1 … slots_used_9: slots expended
 spell_<L>_<N>: the Nth spell line of spell level L (L 0 = cantrips), spell_<L>_<N>_prepared: its prepared checkbox
-spells_text: one box for all spells (only if the sheet has no per-level spell lines)`;
+spells_text: one box for all spells (only if the sheet has no per-level spell lines)
+spellrow_<N>_level / _name / _time / _range / _notes, and checkboxes _c / _r / _m: row N of a single spell TABLE (2024-style sheets)
+size | features_class (or features_class_1 and features_class_2 for two columns) | features_species | feats | weapon_profs | tool_profs
+armor_light, armor_medium, armor_heavy, armor_shields: armor training checkboxes | shield: "shield equipped" checkbox | spell_mod: spellcasting modifier
+backstory_personality: one box for personality and backstory together | attack<N>_notes`;
 
 const KEY_RE = /^(name|player|class_level|classes|subclass|level|species|background|alignment|xp|(str|dex|con|int|wis|cha)(_mod)?|save_(str|dex|con|int|wis|cha)(_prof)?|skill_[a-z_]+?(_prof)?|prof_bonus|inspiration|ac|initiative|speed|hp_max|hp_current|hp_temp|hit_dice|passive_perception|attack[1-6]_(name|bonus|damage)|attacks_text|equipment|cp|sp|ep|gp|pp|features|proficiencies|languages|traits|ideals|bonds|flaws|appearance|backstory|notes|spell_class|spell_ability|spell_dc|spell_attack|slots_(used_)?[1-9]|spell_[0-9]_(1[0-3]|[1-9])(_prepared)?|spells_text)$/;
+// "1 bonus action" → "Bonus", "120 feet" → "120 ft": the spell table's columns are narrow.
+const shortTime = (t) => String(t).replace(/^1 (action|bonus action|reaction)\b.*$/i, (m, a) => ({ action: 'Action', 'bonus action': 'Bonus', reaction: 'Reaction' })[a.toLowerCase()])
+  .replace(/^bonus action$/i, 'Bonus').replace(/minutes?/i, 'min').replace(/hours?/i, 'hr');
+const shortRange = (r) => String(r).replace(/\s*feet\b/i, ' ft').replace(/\s*miles?\b/i, ' mi').replace(/^Self \((.+)\)$/i, 'Self, $1');
+
 // Every key, for the "fix boxes" picker in the app.
 export const ALL_KEYS = [
   'name', 'player', 'class_level', 'classes', 'subclass', 'level', 'species', 'background', 'alignment', 'xp',
@@ -187,8 +250,14 @@ export const ALL_KEYS = [
   'appearance', 'backstory', 'notes', 'spell_class', 'spell_ability', 'spell_dc', 'spell_attack', 'spells_text',
   ...[1, 2, 3, 4, 5, 6, 7, 8, 9].flatMap((l) => [`slots_${l}`, `slots_used_${l}`]),
   ...[0, 1, 2, 3, 4, 5, 6, 7, 8, 9].flatMap((l) => Array.from({ length: 13 }, (_, i) => [`spell_${l}_${i + 1}`, `spell_${l}_${i + 1}_prepared`]).flat()),
+  'size', 'features_class', 'features_class_1', 'features_class_2', 'features_species', 'feats', 'weapon_profs', 'tool_profs',
+  'armor_light', 'armor_medium', 'armor_heavy', 'armor_shields', 'shield', 'spell_mod', 'backstory_personality',
+  ...[1, 2, 3, 4, 5, 6].map((i) => `attack${i}_notes`),
+  ...Array.from({ length: 30 }, (_, i) => ['level', 'name', 'time', 'range', 'notes', 'c', 'r', 'm'].map((k) => `spellrow_${i + 1}_${k}`)).flat(),
 ];
-export const isKey = (k) => KEY_RE.test(k) && (!k.startsWith('skill_') || Object.keys(SKILLS).includes(k.replace(/^skill_/, '').replace(/_prof$/, '')));
+const KEY_SET = new Set(ALL_KEYS);
+export const isKey = (k) => KEY_SET.has(k) || isOldKey(k);
+const isOldKey = (k) => KEY_RE.test(k) && (!k.startsWith('skill_') || Object.keys(SKILLS).includes(k.replace(/^skill_/, '').replace(/_prof$/, '')));
 
 // The other way: a filled sheet's boxes (by key) → a character. Used to import a sheet whose template we know.
 export function fromValues(v) {
@@ -228,17 +297,34 @@ export function fromValues(v) {
     const m = s.match(/^(\d+)\s*[x×]?\s+(.+)$/i);
     return m ? { name: m[2], qty: Number(m[1]) } : { name: s, qty: 1 };
   });
-  c.features = str(get('features')).split(/\n+/).map((s) => s.trim()).filter(Boolean).map((s) => {
+  const featureLines = (text, tag) => str(text).split(/\n+/).map((s) => s.trim()).filter(Boolean).map((s) => {
     const m = s.match(/^([^:.]{2,40})[:.]\s*(.*)$/);
-    return m ? { name: m[1].replace(/^[•*-]\s*/, ''), text: m[2] } : { name: s.replace(/^[•*-]\s*/, ''), text: '' };
+    const f = m ? { name: m[1].replace(/^[•*-]\s*/, ''), text: m[2] } : { name: s.replace(/^[•*-]\s*/, ''), text: '' };
+    return tag && !f.text ? { ...f, text: tag } : f;
   });
-  c.proficiencies = str(get('proficiencies')); c.languages = str(get('languages'));
+  c.features = [
+    ...featureLines(get('features')), ...featureLines(get('features_class')), ...featureLines(get('features_class_1')), ...featureLines(get('features_class_2')),
+    ...featureLines(get('features_species'), 'Species trait'), ...featureLines(get('feats'), 'Feat'),
+  ];
+  c.size = str(get('size'));
+  if (!c.classes[0]?.subclass && get('subclass') && c.classes[0]) c.classes[0].subclass = str(get('subclass'));
+  const profParts = [str(get('weapon_profs')) && `Weapons: ${str(get('weapon_profs'))}`, str(get('tool_profs')) && `Tools: ${str(get('tool_profs'))}`];
+  const armorParts = ['light', 'medium', 'heavy'].filter((a) => yes(`armor_${a}`)).map((a) => `${a} armor`).concat(yes('armor_shields') ? ['shields'] : []);
+  if (armorParts.length) profParts.unshift(`Armor: ${armorParts.join(', ')}`);
+  c.proficiencies = [str(get('proficiencies')), ...profParts.filter(Boolean)].filter(Boolean).join('\n'); c.languages = str(get('languages'));
+  if (!c.backstory && get('backstory_personality')) c.backstory = str(get('backstory_personality'));
   c.personality = { traits: str(get('traits')), ideals: str(get('ideals')), bonds: str(get('bonds')), flaws: str(get('flaws')) };
   c.appearance = str(get('appearance')); c.backstory = str(get('backstory')); c.notes = str(get('notes'));
   const ab = str(get('spell_ability')).toLowerCase();
   c.spellcasting.ability = ABILITIES.find((a) => ab.startsWith(a) || ABILITY_NAMES[a].toLowerCase() === ab) || '';
   c.spellcasting.class = str(get('spell_class'));
   for (let l = 1; l <= 9; l++) { const n = num(get(`slots_${l}`)); if (n) c.spellcasting.slots[l] = { max: n, used: num(get(`slots_used_${l}`)) || 0 }; }
+  for (let n = 1; n <= 30; n++) {
+    const nm = str(get(`spellrow_${n}_name`));
+    if (!nm) continue;
+    const lv = str(get(`spellrow_${n}_level`));
+    c.spellcasting.spells.push({ name: nm, level: /^c/i.test(lv) ? 0 : num(lv) || 0, prepared: true, time: str(get(`spellrow_${n}_time`)), range: str(get(`spellrow_${n}_range`)), notes: str(get(`spellrow_${n}_notes`)) });
+  }
   for (let l = 0; l <= 9; l++) for (let i = 1; i <= 13; i++) {
     const n = str(get(`spell_${l}_${i}`));
     if (n) c.spellcasting.spells.push({ name: n, level: l, prepared: yes(`spell_${l}_${i}_prepared`) });
@@ -388,8 +474,42 @@ export function listTemplates() {
 }
 export const templateFile = (name) => path.join(SHEETS_DIR, `${path.basename(String(name)).replace(/\.pdf$/i, '')}.pdf`);
 const mapFile = (name) => path.join(SHEETS_DIR, `${path.basename(String(name)).replace(/\.pdf$/i, '')}.map.json`);
+// Sheets Note Tiger already knows box by box (made by hand from the real PDF), matched by their set of box names.
+const BUILTIN_FILES = ['sheet-dnd-2024-official.json'];
+let builtins = null;
+function builtinMaps() {
+  if (!builtins) builtins = BUILTIN_FILES.map(readRules).filter(Boolean).map((b) => ({ ...b, fieldSet: new Set(b.fields) }));
+  return builtins;
+}
+const fieldNamesCache = new Map(); // template file + mtime → its box names
+async function templateFieldNames(name) {
+  const file = templateFile(name);
+  const st = fs.statSync(file);
+  const k = `${file}|${st.mtimeMs}`;
+  if (!fieldNamesCache.has(k)) {
+    const pdf = await PDFDocument.load(fs.readFileSync(file), { ignoreEncryption: true });
+    fieldNamesCache.set(k, pdf.getForm().getFields().map((f) => f.getName()));
+  }
+  return fieldNamesCache.get(k);
+}
+async function builtinFor(name) {
+  const names = await templateFieldNames(name).catch(() => []);
+  if (!names.length) return null;
+  return builtinMaps().find((b) => names.filter((n) => b.fieldSet.has(n)).length >= 0.95 * Math.max(names.length, b.fields.length)) || null;
+}
+function builtinAsMap(b) {
+  return { by: 'built-in', builtin: b.id, title: b.title, at: new Date().toISOString(), boxes: b.fields.map((n) => ({ name: n, type: '', page: 0, label: '', key: b.map[n] || null })) };
+}
 export function readTemplateMap(name) {
   try { return JSON.parse(fs.readFileSync(mapFile(name), 'utf8')); } catch { return null; }
+}
+// The map to fill with: a built-in one beats anything the AI guessed (but not your own fixes).
+export async function templateMapForFill(name) {
+  const saved = readTemplateMap(name);
+  if (saved?.by === 'edited' || saved?.by === 'built-in') return saved;
+  const b = await builtinFor(name);
+  if (b) { const m = builtinAsMap(b); saveTemplateMap(name, m); return m; }
+  return saved;
 }
 export function saveTemplateMap(name, map) {
   if (!fs.existsSync(templateFile(name))) throw new Error('No such sheet.');
@@ -427,6 +547,8 @@ const NAME_HINTS = [
 const guessByName = (n) => (NAME_HINTS.find(([re]) => re.test(n.trim())) || [])[1] || null;
 
 export async function mapTemplate(name, askAI, { onProgress = () => {} } = {}) {
+  const known = await builtinFor(name);
+  if (known) { const m = builtinAsMap(known); saveTemplateMap(name, m); onProgress(1, 1); return m; }
   const boxes = await readFormBoxes(fs.readFileSync(templateFile(name)));
   const result = new Map();
   const used = new Set();
@@ -471,24 +593,29 @@ right after the box for the same row (e.g. the attack table) belongs to that row
 
 // ---------- filling a sheet ----------
 export async function fillSheet(name, character) {
-  const map = readTemplateMap(name);
+  const map = await templateMapForFill(name);
   if (!map) throw new Error(`The "${name}" sheet hasn't been set up yet (Library → Character sheets → Match boxes).`);
   const pdf = await PDFDocument.load(fs.readFileSync(templateFile(name)), { ignoreEncryption: true });
   const form = pdf.getForm();
+  const font = await pdf.embedFont(StandardFonts.Helvetica);
   const values = fillValues(normalize(character));
   for (const b of map.boxes) {
     if (!b.key) continue;
     const v = values[b.key];
-    if (v == null || v === '') continue;
+    if (v == null || v === '' || v === false) continue;
     let f;
     try { f = form.getField(b.name); } catch { continue; }
     try {
-      if (f instanceof PDFCheckBox) { if (v === true) f.check(); else f.uncheck(); }
+      // Only tick boxes. Unticking makes the PDF library redraw the box, which on some sheets draws an X in it.
+      if (f instanceof PDFCheckBox) { if (v === true) f.check(); }
       else if (f instanceof PDFTextField) {
-        const text = String(v === true ? 'X' : v === false ? '' : v);
+        let text = String(v === true ? 'X' : v);
         const max = f.getMaxLength();
+        if (max) text = text.slice(0, max);
         if (!f.isMultiline() && text.includes('\n')) f.enableMultiline();
-        f.setText(max ? text.slice(0, max) : text);
+        f.setText(text);
+        fitText(f, text, font);
+        f.updateAppearances(font);
       } else if (f instanceof PDFDropdown) {
         const opt = f.getOptions().find((o) => o.toLowerCase() === String(v).toLowerCase());
         if (opt) f.select(opt); else if (f.isEditable()) f.select(String(v));
@@ -499,7 +626,30 @@ export async function fillSheet(name, character) {
       console.error(`[sheets] box ${b.name}:`, err.message);
     }
   }
-  return Buffer.from(await pdf.save({ updateFieldAppearances: true }));
+  // Text boxes were drawn above, one by one. Redrawing the whole form would also redraw every checkbox, and some
+  // sheets' checkboxes then show an X even when unticked.
+  return Buffer.from(await pdf.save({ updateFieldAppearances: false }));
+}
+
+// Shrinks the text size so it fits its box (narrow boxes like "Damage & Type" or "Size").
+function fitText(f, text, font) {
+  const w = f.acroField.getWidgets()[0];
+  if (!w) return;
+  const r = w.getRectangle();
+  const pad = 4;
+  if (f.isMultiline()) {
+    // Smaller text for long boxes: aim for every line to fit across, and all lines to fit down.
+    const lines = text.split('\n');
+    for (let size = 10; size >= 6; size -= 0.5) {
+      const across = lines.reduce((n, l) => n + Math.max(1, Math.ceil(font.widthOfTextAtSize(l, size) / Math.max(10, r.width - pad))), 0);
+      if (across * size * 1.2 <= r.height - pad || size === 6) { f.setFontSize(size); return; }
+    }
+    return;
+  }
+  const maxSize = Math.min(12, Math.max(6, (r.height - 2) * 0.75));
+  let size = maxSize;
+  while (size > 5 && font.widthOfTextAtSize(text, size) > r.width - pad) size -= 0.5;
+  f.setFontSize(size);
 }
 
 // ---------- importing a filled sheet ----------
