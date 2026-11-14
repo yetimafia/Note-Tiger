@@ -41,6 +41,10 @@ import { askBooks, booksFor, serverSetup, renderPage, pageInfo } from './library
 import { buildCampaign, addEdit, campaignSummary, logRulesCall, npcKey, latestStory, allQuotes, gmPrep } from './campaign.js';
 import { knownNames } from './spelling.js';
 import { campaignBook } from './book.js';
+import {
+  importSheet, saveCharacter, findCharacter, listCharacters, deleteCharacter, sheetSummary, sheetForAI, fillSheet, listTemplates,
+  ASK_SYSTEM as SHEET_ASK_SYSTEM,
+} from './sheets.js';
 import { sendAlert } from './alerts.js';
 import { SITE_PASSWORD, SITE_SHARE_PASSWORD, LIB_PAGE_IMAGES, USE_CLAUDE, GM_CHANNEL, PREP_ENABLED, GAME_DAY, GAME_TIME, PREP_HOURS } from './config.js';
 
@@ -560,6 +564,22 @@ const commands = [
       .addStringOption((o) => o.setName('text').setDescription('e.g. "We still owe Sticks 5,000¥"').setRequired(true))),
   new SlashCommandBuilder().setName('ask').setDescription('Ask about past sessions')
     .addStringOption((o) => o.setName('question').setDescription('e.g. "What did Mr. Johnson offer us for the Ares job?"').setRequired(true)),
+  new SlashCommandBuilder().setName('sheet').setDescription('D&D character sheets')
+    .addSubcommand((c) => c.setName('import').setDescription('Read your character sheet (PDF) into Note Tiger')
+      .addAttachmentOption((o) => o.setName('file').setDescription('Your sheet as a PDF (D&D Beyond export, official sheet, …)').setRequired(true))
+      .addUserOption((o) => o.setName('player').setDescription('GM only: import it for another player')))
+    .addSubcommand((c) => c.setName('show').setDescription('Show a character')
+      .addUserOption((o) => o.setName('player').setDescription('Whose (default: yours)'))
+      .addStringOption((o) => o.setName('name').setDescription('Or the character\'s name').setAutocomplete(true)))
+    .addSubcommand((c) => c.setName('pdf').setDescription('Get a character as a filled-in sheet')
+      .addStringOption((o) => o.setName('sheet').setDescription('Which blank sheet to fill').setAutocomplete(true))
+      .addUserOption((o) => o.setName('player').setDescription('Whose (default: yours)'))
+      .addStringOption((o) => o.setName('name').setDescription('Or the character\'s name').setAutocomplete(true)))
+    .addSubcommand((c) => c.setName('ask').setDescription('Ask about your character ("what\'s my stealth bonus?")')
+      .addStringOption((o) => o.setName('question').setDescription('Your question').setRequired(true))
+      .addUserOption((o) => o.setName('player').setDescription('Whose character (default: yours)')))
+    .addSubcommand((c) => c.setName('list').setDescription('Everyone\'s characters on this server'))
+    .addSubcommand((c) => c.setName('remove').setDescription('Remove your character from Note Tiger')),
   new SlashCommandBuilder().setName('help').setDescription('List all my commands and what they do')
     .addBooleanOption((o) => o.setName('public').setDescription('Post it for everyone instead of just you')),
 ].map((c) => c.toJSON());
@@ -569,6 +589,7 @@ const HELP_GROUPS = [
   ['🎙️ Recording', ['session', 'note', 'character', 'optout']],
   ['📼 Recaps', ['recap', 'repost', 'ask']],
   ['📚 Rulebooks', ['game']],
+  ['🧙 Character sheets', ['sheet']],
   ['🕵️ Campaign', ['campaign']],
   ['❓ Help', ['help']],
 ];
@@ -641,6 +662,14 @@ client.on('interactionCreate', async (interaction) => {
     }
     return;
   }
+  // Suggestions while typing: blank sheets and character names for /sheet.
+  if (interaction.isAutocomplete() && interaction.commandName === 'sheet') {
+    const focused = interaction.options.getFocused(true);
+    const q = String(focused.value || '').toLowerCase();
+    const names = focused.name === 'sheet' ? listTemplates().filter((t) => t.mapped).map((t) => t.name)
+      : listCharacters(interaction.guildId).map((c) => c.name);
+    return interaction.respond(names.filter((n) => n.toLowerCase().includes(q)).slice(0, 25).map((n) => ({ name: n.slice(0, 100), value: n.slice(0, 100) }))).catch(() => {});
+  }
   if (!interaction.isChatInputCommand()) return;
   const { guild, commandName } = interaction;
   const gid = guild.id;
@@ -708,6 +737,78 @@ client.on('interactionCreate', async (interaction) => {
       if (name) s.characters[interaction.user.id] = name; else delete s.characters[interaction.user.id];
       saveSettings(gid, s);
       return interaction.reply({ content: name ? `You're now listed as **${name}** in transcripts.` : 'Runner name cleared.', flags: MessageFlags.Ephemeral });
+    }
+
+    if (commandName === 'sheet') {
+      const sub = interaction.options.getSubcommand();
+      const target = interaction.options.getUser('player');
+      const nameOpt = interaction.options.getString('name');
+      const isMe = !target || target.id === interaction.user.id;
+      const who = () => findCharacter(gid, nameOpt ? { name: nameOpt } : { userId: (target || interaction.user).id });
+      const none = () => interaction.editReply(nameOpt ? `I don't have a character called **${nameOpt}**. Try \`/sheet list\`.`
+        : isMe ? 'You don\'t have a character yet. Attach your sheet with `/sheet import`.' : `${target.displayName || target.username} doesn't have a character yet.`);
+
+      if (sub === 'import') {
+        const anyGmRole = guild.roles.cache.some((r) => GM_ROLES.includes(r.name.toLowerCase()));
+        if (!isMe && anyGmRole && !isGM(interaction.member)) return interaction.reply({ content: 'Only the GM can import a sheet for someone else.', flags: MessageFlags.Ephemeral });
+        const file = interaction.options.getAttachment('file');
+        if (!/\.pdf$/i.test(file.name || '') && file.contentType !== 'application/pdf') return interaction.reply({ content: 'Attach the sheet as a **PDF** (on D&D Beyond: your character → Export to PDF).', flags: MessageFlags.Ephemeral });
+        if (file.size > 25 * 1024 * 1024) return interaction.reply({ content: 'That PDF is over 25 MB.', flags: MessageFlags.Ephemeral });
+        await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+        await interaction.editReply('📄 Reading your sheet… (with the local AI this can take a minute or two)');
+        const res = await fetch(file.url);
+        if (!res.ok) throw new Error(`couldn't download the attachment (${res.status})`);
+        const buf = Buffer.from(await res.arrayBuffer());
+        const { character, how } = await importSheet(buf, askAI, { log: (m) => console.log(m) });
+        const player = target || interaction.user;
+        const member = await guild.members.fetch(player.id).catch(() => null);
+        const existing = findCharacter(gid, { userId: player.id });
+        const saved = saveCharacter(gid, {
+          ...character, id: existing?.id, playerId: player.id, player: character.player || member?.displayName || player.username,
+        }, { by: interaction.user.username, change: `imported from ${file.name} (${how})` });
+        // Transcripts show the character's name next to the player's, like /character.
+        const st = getSettings(gid);
+        if (!st.characters[player.id]) { st.characters[player.id] = saved.name; saveSettings(gid, st); }
+        console.log(`[sheets] ${interaction.user.username} imported ${saved.name} for ${player.username} via ${how}`);
+        return interaction.editReply(`✅ Imported **${saved.name}** from ${how}${existing ? ' (replaced the old one)' : ''}.\n` +
+          `Check it with \`/sheet show\`. Something wrong? Fix it in the Note Tiger app → Campaign → Characters.\n\n${sheetSummary(saved, { short: true })}`);
+      }
+
+      if (sub === 'list') {
+        const all = listCharacters(gid);
+        if (!all.length) return interaction.reply({ content: 'No characters yet. Players can add theirs with `/sheet import`.', flags: MessageFlags.Ephemeral });
+        return interaction.reply(splitForDiscord(`🧙 **Characters (${all.length})**\n${all.map((c) => `• ${sheetSummary(c, { short: true }).split('\n').slice(0, 2).join(': ')}`).join('\n')}`)[0]);
+      }
+
+      if (sub === 'remove') {
+        const c = findCharacter(gid, { userId: interaction.user.id });
+        if (!c) return interaction.reply({ content: 'You don\'t have a character here.', flags: MessageFlags.Ephemeral });
+        deleteCharacter(gid, c.id, { by: interaction.user.username });
+        return interaction.reply({ content: `Removed **${c.name}**. (Import a sheet again any time.)`, flags: MessageFlags.Ephemeral });
+      }
+
+      await interaction.deferReply();
+      const c = who();
+      if (!c) return none();
+
+      if (sub === 'show') return interaction.editReply(splitForDiscord(sheetSummary(c))[0]);
+
+      if (sub === 'pdf') {
+        const templates = listTemplates().filter((t) => t.mapped);
+        if (!templates.length) return interaction.editReply('No blank sheets are set up yet. Add one in the Note Tiger app → Library → Character sheets.');
+        const want = interaction.options.getString('sheet');
+        const t = want ? templates.find((x) => x.name.toLowerCase() === want.toLowerCase()) || templates.find((x) => x.name.toLowerCase().includes(want.toLowerCase())) : templates[0];
+        if (!t) return interaction.editReply(`No sheet called **${want}**. I have: ${templates.map((x) => x.name).join(', ')}.`);
+        const pdf = await fillSheet(t.name, c);
+        const fileName = `${c.name.replace(/[^\w -]+/g, '').trim() || 'character'} - ${t.name}.pdf`;
+        return interaction.editReply({ content: `📄 **${c.name}** on the **${t.name}** sheet${templates.length > 1 ? ` (others: ${templates.filter((x) => x !== t).map((x) => x.name).join(', ')})` : ''}`, files: [new AttachmentBuilder(pdf, { name: fileName })] });
+      }
+
+      if (sub === 'ask') {
+        const question = interaction.options.getString('question');
+        const answer = await askAI(SHEET_ASK_SYSTEM, `CHARACTER SHEET:\n${sheetForAI(c)}\n\nQUESTION: ${question}`, 500);
+        return interaction.editReply(splitForDiscord(`🧙 **${c.name}**: ${question}\n${answer}`)[0]);
+      }
     }
 
     if (commandName === 'optout') {

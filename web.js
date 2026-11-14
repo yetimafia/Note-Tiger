@@ -105,6 +105,20 @@ export function startWeb(ctx, port) {
         return send(res, 200, { ok: true, file: ctx.addBook(name, Buffer.concat(chunks)) });
       } catch (err) { return send(res, 400, { error: err.message }); }
     }
+    // PDF uploads for character sheets: a blank sheet (template), or a filled one to import as a character.
+    const sheetUp = req.method === 'POST' && (req.url === '/api/sheets/upload' || /^\/api\/characters\/\d{5,25}\/import$/.test(req.url));
+    if (sheetUp) {
+      if (req.headers['content-type'] !== 'application/pdf') return send(res, 415, { error: 'Expected a PDF' });
+      try {
+        const chunks = [];
+        let size = 0;
+        for await (const c of req) { size += c.length; if (size > 60e6) throw new Error('That file is too big (60 MB max).'); chunks.push(c); }
+        const name = decodeURIComponent(req.headers['x-filename'] || 'sheet.pdf');
+        const buf = Buffer.concat(chunks);
+        if (req.url === '/api/sheets/upload') return send(res, 200, await ctx.addSheetTemplate(name, buf));
+        return send(res, 200, await ctx.importCharacter(req.url.split('/')[3], buf, name));
+      } catch (err) { return send(res, 400, { error: err.message }); }
+    }
     if (req.method !== 'GET' && req.headers['content-type'] !== 'application/json') {
       return send(res, 415, { error: 'Expected JSON' });
     }
@@ -125,6 +139,32 @@ export function startWeb(ctx, port) {
       // GET /api/status
       if (parts[1] === 'status' && req.method === 'GET') return send(res, 200, ctx.status());
 
+      // Characters (D&D sheets): list/save/delete, a filled PDF, the change history.
+      if (parts[1] === 'characters' && /^\d{5,25}$/.test(parts[2] || '')) {
+        const gid = parts[2];
+        if (!parts[3] && req.method === 'GET') return send(res, 200, ctx.characters(gid));
+        if (!parts[3] && req.method === 'POST') return send(res, 200, ctx.saveCharacter(gid, await readBody(req)));
+        if (parts[3] && parts[4] === 'delete' && req.method === 'POST') return send(res, 200, { ok: ctx.deleteCharacter(gid, parts[3]) });
+        if (parts[3] && parts[4] === 'pdf' && req.method === 'GET') {
+          const { pdf, fileName } = await ctx.characterPdf(gid, parts[3], url.searchParams.get('sheet') || '');
+          res.writeHead(200, { 'Content-Type': 'application/pdf', 'Content-Disposition': `attachment; filename*=UTF-8''${encodeURIComponent(fileName)}` });
+          return res.end(pdf);
+        }
+      }
+      // Blank character sheets: list, remove, let the AI match the boxes, see/fix the matches, a test fill.
+      if (parts[1] === 'sheets') {
+        const name = parts[2] ? decodeURIComponent(parts[2]) : '';
+        if (!name && req.method === 'GET') return send(res, 200, ctx.sheetTemplates());
+        if (name && parts[3] === 'remove' && req.method === 'POST') return send(res, 200, ctx.removeSheetTemplate(name));
+        if (name && parts[3] === 'match' && req.method === 'POST') return send(res, 200, ctx.matchSheetTemplate(name));
+        if (name && parts[3] === 'map' && req.method === 'GET') return send(res, 200, ctx.sheetTemplateMap(name));
+        if (name && parts[3] === 'map' && req.method === 'POST') return send(res, 200, ctx.saveSheetTemplateMap(name, await readBody(req)));
+        if (name && parts[3] === 'sample' && req.method === 'GET') {
+          const pdf = await ctx.sampleSheet(name);
+          res.writeHead(200, { 'Content-Type': 'application/pdf', 'Content-Disposition': `inline; filename*=UTF-8''${encodeURIComponent(`${name} (test fill).pdf`)}` });
+          return res.end(pdf);
+        }
+      }
       // Council: GET /api/council (status of the saved members), POST /api/council/check (members not saved yet)
       if (parts[1] === 'council' && !parts[2] && req.method === 'GET') return send(res, 200, await ctx.councilStatus());
       if (parts[1] === 'council' && parts[2] === 'check' && req.method === 'POST') {

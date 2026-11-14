@@ -12,6 +12,7 @@ import {
 } from './store.js';
 import { updateCampaign, updateStory, rulesSection, updateVoiceCards, buildCampaign } from './campaign.js';
 import { knownNames } from './spelling.js';
+import { listCharacters, classLine } from './sheets.js';
 import { findTableTalk, gameLogText, withoutViolence } from './squirrel.js';
 import { findVoices } from './voices.js';
 import { councilConfig, runCouncil, voteTableTalk, voteVoices, judgeDrafts, saveCouncilRecord, setCouncilOverride } from './council.js';
@@ -254,10 +255,15 @@ async function writeRecap(title, date, gameText, tableText, prevRecap, dir = nul
   const prevPart = prevRecap ? `For context, here is the PREVIOUS session's recap:\n${prevRecap}\n\n---\n\n` : '';
   const names = dir ? knownNames(gidOf(dir)) : '';
   const namesPart = names ? `Correct spellings of names in this campaign (the transcript may mangle them): ${names}\n\n` : '';
+  // Imported character sheets (D&D): who plays whom, so the recap gets names, classes and roles right.
+  let party = [];
+  try { party = dir ? listCharacters(gidOf(dir)) : []; } catch { /* no sheets */ }
+  const partyPart = party.length ? `THE PARTY (from their character sheets): ${party.map((c) => `${c.name}${c.player ? ` (played by ${c.player})` : ''}: ` +
+    `${[c.species, classLine({ classes: c.classes || [] })].filter(Boolean).join(' ')}`).join('; ')}\n\n` : '';
   const log = dir ? gameLogText(readJSON(path.join(dir, 'labels.json'), {}).sceneLog) : '';
   const logPart = log ? `GAME LOG (built while following the whole session; trust it for whether fights, injuries and deaths ` +
     `really happened, since players joke about those a lot):\n${log}\n\n---\n\n` : '';
-  const head = `${prevPart}${namesPart}${logPart}Session title: ${title} (${date})\n\n`;
+  const head = `${prevPart}${namesPart}${partyPart}${logPart}Session title: ${title} (${date})\n\n`;
   const tablePart = tableText ? `\n\n---\n${TABLE_TALK_NOTE}\n${tableTalkCandidates(tableText, USE_CLAUDE ? 60_000 : 6_000)}` : '';
   const chunks = chunkText(gameText || '(no in-game talk was transcribed)', RECAP_CHUNK_CHARS);
   if (chunks.length === 1) {

@@ -16,6 +16,25 @@ import { sendAlert, testAlert } from './alerts.js';
 import { campaignBook } from './book.js';
 import { recapSession, askArchive, ollamaStatus, refreshOllama, AI_LABEL, getProgress, askAI } from './ai.js';
 import { councilStatus, checkMember, parseMembers, machineOf } from './council.js';
+import {
+  listCharacters, getCharacter, saveCharacter, deleteCharacter, importSheet, fillSheet, listTemplates, addTemplate, removeTemplate,
+  mapTemplate, readTemplateMap, saveTemplateMap, characterHistory, KEY_GUIDE, ALL_KEYS, normalize,
+} from './sheets.js';
+
+// Matching a blank sheet's boxes runs in the background (it can take a few minutes on the local AI).
+const sheetMatching = new Map(); // name → { done, total, error }
+// A made-up character to test-fill a sheet with.
+const SAMPLE_CHARACTER = {
+  name: 'Test Character', player: 'Note Tiger', classes: [{ name: 'Wizard', subclass: 'Evocation', level: 5 }], species: 'Elf', background: 'Sage',
+  alignment: 'Neutral Good', xp: 6500, abilities: { str: 8, dex: 14, con: 13, int: 18, wis: 12, cha: 10 },
+  saves: { int: { prof: true }, wis: { prof: true } }, skills: { arcana: { prof: true }, history: { prof: true }, investigation: { prof: true }, perception: { prof: true } },
+  ac: 12, speed: '30 ft', hp: { max: 27, current: 27 }, hitDice: '5d6', attacks: [{ name: 'Quarterstaff', bonus: '+1', damage: '1d6-1 bludgeoning' }, { name: 'Fire Bolt', bonus: '+7', damage: '2d10 fire' }],
+  spellcasting: { class: 'Wizard', ability: 'int', slots: { 1: { max: 4 }, 2: { max: 3 }, 3: { max: 2 } },
+    spells: [{ name: 'Fire Bolt', level: 0 }, { name: 'Mage Hand', level: 0 }, { name: 'Magic Missile', level: 1, prepared: true }, { name: 'Shield', level: 1, prepared: true }, { name: 'Misty Step', level: 2, prepared: true }, { name: 'Fireball', level: 3, prepared: true }] },
+  inventory: [{ name: 'Spellbook' }, { name: 'Component pouch' }, { name: 'Potion of Healing', qty: 2 }], money: { gp: 120, sp: 15 },
+  features: [{ name: 'Arcane Recovery', text: 'Regain spell slots on a short rest.' }, { name: 'Sculpt Spells' }], languages: 'Common, Elvish, Draconic',
+  personality: { traits: 'Always has a book open.', ideals: 'Knowledge.', bonds: 'My old master\'s library.', flaws: 'Overconfident.' },
+};
 
 // Council status for the dashboard (checked every 30 s; the Settings page asks for a fresh check).
 let councilCache = null;
@@ -140,6 +159,55 @@ function guildList() {
 
 startWeb({
   councilStatus() { return refreshCouncil(); },
+  // ---------- characters (D&D sheets) ----------
+  characters(gid) { return { characters: listCharacters(gid), history: characterHistory(gid), sheets: listTemplates().filter((t) => t.mapped).map((t) => t.name) }; },
+  saveCharacter(gid, body) { return saveCharacter(gid, body, { by: 'Note Tiger app', change: body.change || 'edited in the app' }); },
+  deleteCharacter(gid, id) { return deleteCharacter(gid, id, { by: 'Note Tiger app' }); },
+  async importCharacter(gid, buf, fileName) {
+    const { character, how } = await importSheet(buf, askAI, { log: (m) => console.log(m) });
+    const existing = listCharacters(gid).find((c) => c.name.toLowerCase() === character.name.toLowerCase());
+    const saved = saveCharacter(gid, { ...character, id: existing?.id, playerId: existing?.playerId || '' },
+      { by: 'Note Tiger app', change: `imported from ${fileName} (${how})` });
+    return { character: saved, how, replaced: Boolean(existing) };
+  },
+  async characterPdf(gid, id, sheet) {
+    const c = getCharacter(gid, id);
+    if (!c) throw new Error('No such character.');
+    const mapped = listTemplates().filter((t) => t.mapped);
+    const t = mapped.find((x) => x.name === sheet) || mapped[0];
+    if (!t) throw new Error('Add a blank sheet first (Library → Character sheets).');
+    return { pdf: await fillSheet(t.name, c), fileName: `${c.name} - ${t.name}.pdf` };
+  },
+  // ---------- blank sheets ----------
+  sheetTemplates() {
+    return { sheets: listTemplates().map((t) => ({ ...t, matching: sheetMatching.get(t.name) || null })), keyGuide: KEY_GUIDE, keys: ALL_KEYS };
+  },
+  async addSheetTemplate(name, buf) {
+    const t = await addTemplate(name, buf);
+    this.matchSheetTemplate(t.name);   // start matching its boxes right away
+    return t;
+  },
+  removeSheetTemplate(name) { removeTemplate(name); return { ok: true }; },
+  matchSheetTemplate(name) {
+    if (sheetMatching.get(name)?.running) return { ok: true, already: true };
+    const st = { running: true, done: 0, total: 0, error: null };
+    sheetMatching.set(name, st);
+    mapTemplate(name, askAI, { onProgress: (d, t) => { st.done = d; st.total = t; } })
+      .then(() => { st.running = false; })
+      .catch((err) => { st.running = false; st.error = err.message; console.error('[sheets] matching failed:', err.message); });
+    return { ok: true };
+  },
+  sheetTemplateMap(name) { return readTemplateMap(name) || { boxes: [] }; },
+  saveSheetTemplateMap(name, body) {
+    const map = readTemplateMap(name);
+    if (!map) throw new Error('Match the boxes first.');
+    const keys = body.keys || {};
+    for (const b of map.boxes) if (b.name in keys) b.key = keys[b.name] || null;
+    map.by = 'edited'; map.at = new Date().toISOString();
+    saveTemplateMap(name, map);
+    return { ok: true };
+  },
+  sampleSheet(name) { return fillSheet(name, normalize(SAMPLE_CHARACTER)); },
   // Checks members typed in Settings before they're saved.
   async councilCheck(list) {
     const members = parseMembers(JSON.stringify(list || []));

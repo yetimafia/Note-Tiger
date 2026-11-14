@@ -1,9 +1,9 @@
-**New in 2.9.0: Council mode** (Settings → Council)
-- 🏛 List several local AIs (this PC and/or other PCs on your home network running Ollama). Each one labels the night (table talk, fights, NPC voices) and writes a recap draft. Each line goes by majority vote, and a judge merges the drafts, keeping what at least two agree on and leaning on the GM's narration.
-- PCs work at the same time. Several models on one PC take turns, so you can try it before buying hardware.
-- A member that's off, asleep or too slow is skipped. If nobody answers, this PC does the recap alone, so you never lose a session.
-- Live status for each member in Settings and on the Dashboard. Each session shows 🏛 with who took part.
-- **compare-council.bat** compares one AI with the council on a past session (on a copy; nothing changes).
-- With 0 or 1 members, or with Claude, everything works exactly as before.
+**New in 2.10.0: D&D character sheets** (part 1)
+- 🧙 `/sheet import`: attach your character sheet (PDF from D&D Beyond, the official fillable sheet, or your group's own) and Note Tiger reads it in.
+- `/sheet show`, `/sheet ask "what's my stealth bonus?"`, `/sheet list`, `/sheet remove`.
+- `/sheet pdf`: get your character back filled in on any blank sheet you've added (Library → Character sheets). Note Tiger works out each box once; use Test fill / Fix boxes to check.
+- Campaign → Characters: see, edit, import and download every character.
+- Recaps now know the party (names, classes, who plays whom).
+- `/help` lists the new commands.
 
-Your settings, sessions and rulebooks are kept when you update.
+Coming next: sheets that update themselves after each session, and a character builder.

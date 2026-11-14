@@ -213,6 +213,26 @@
   .crow .cdel { background: none; border: 1px solid var(--line); color: var(--dim); border-radius: 8px; height: 34px; cursor: pointer; }
   .crow .cdel:hover { color: var(--red); border-color: var(--red); }
   .chead { display: grid; grid-template-columns: 1fr 1.6fr 1.2fr auto 34px; gap: 8px; font-size: 12px; color: var(--dim); margin-bottom: 4px; }
+
+  .chars { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
+  .char { border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; background: var(--panel2); }
+  .char h3 { margin: 0 0 2px; font-size: 16px; } .char .sub2 { color: var(--dim); font-size: 13px; }
+  .char .stats { display: flex; gap: 10px; flex-wrap: wrap; margin: 8px 0; font-size: 13px; }
+  .char .abil { display: grid; grid-template-columns: repeat(6, 1fr); gap: 4px; text-align: center; font-size: 11px; color: var(--dim); }
+  .char .abil b { display: block; font-size: 15px; color: var(--text); }
+  .char .acts { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
+  .char .acts select { width: auto; padding: 4px 8px; font-size: 12px; }
+  .charedit { border: 1px solid var(--accent); border-radius: 12px; padding: 14px; margin-top: 14px; }
+  .charedit .g { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px 12px; }
+  .charedit label { font-size: 12px; color: var(--dim); display: block; }
+  .charedit textarea { width: 100%; min-height: 220px; font-family: ui-monospace, monospace; font-size: 12px; }
+  .sheetrow { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+  .sheetrow b { min-width: 160px; }
+  .mapgrid { max-height: 460px; overflow: auto; margin-top: 10px; border: 1px solid var(--line); border-radius: 10px; }
+  .mapgrid table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  .mapgrid td, .mapgrid th { padding: 4px 8px; border-bottom: 1px solid var(--line); text-align: left; }
+  .mapgrid th { position: sticky; top: 0; background: var(--panel); }
+  .mapgrid input { padding: 3px 6px; font-size: 12px; margin: 0; }
   .tag.tt { background: var(--bg); color: var(--dim); border: 1px solid var(--line); }
   .tview.hide-tt .tblock.tt { display: none; }
   .timeline { border-left: 2px solid var(--line); margin-left: 56px; }
@@ -311,6 +331,15 @@
       <details id="campStoryBox"><summary style="cursor:pointer"><h2 style="display:inline;margin:0">📖 The story so far</h2> <span class="hint" id="campStoryWhen"></span></summary>
         <div class="recap" id="campStory" style="margin-top:10px"></div></details>
     </div>
+    <div class="card" id="charCard">
+      <div class="row" style="justify-content:space-between"><h2 style="margin:0">🧙 Characters <span class="hint" id="charCount"></span></h2>
+        <div class="row" style="gap:8px"><button class="btn ghost" id="charImportBtn" type="button">Import a sheet (PDF)</button>
+          <input type="file" id="charFile" accept="application/pdf,.pdf" hidden></div></div>
+      <div class="hint" style="margin:4px 0 10px">D&amp;D character sheets. Players can also import theirs in Discord with <code>/sheet import</code>.
+        Get one back filled in on any of your blank sheets (Library → Character sheets).</div>
+      <div id="charList"><div class="empty">Loading…</div></div>
+      <div id="charEdit"></div>
+    </div>
     <div class="card">
       <div class="row" style="justify-content:space-between"><h2 style="margin:0">🏃 Runners <span class="hint" id="campRunCount"></span></h2>
         <div class="row" style="gap:8px"><button class="btn ghost" id="campBookBtn" type="button">📕 Campaign book (PDF)</button><button class="btn ghost" id="campPrepBtn" type="button">🎲 GM prep note</button></div></div>
@@ -378,6 +407,16 @@
     <div class="card" id="libDrop" style="border-style:dashed;text-align:center;color:var(--dim)">Drag PDFs here, or use <b>Add PDFs</b>. Everything stays on this computer.</div>
     <div id="libProg"></div>
     <div class="card"><h2>Books</h2><div id="libBooks"><div class="empty">Loading…</div></div></div>
+    <div class="card" id="sheetCard">
+      <div class="row" style="justify-content:space-between"><h2 style="margin:0">📄 Character sheets</h2>
+        <div class="row" style="gap:8px"><button class="btn ghost" id="sheetAddBtn" type="button">Add a blank sheet (PDF)</button>
+          <input type="file" id="sheetFile" accept="application/pdf,.pdf" multiple hidden></div></div>
+      <div class="hint" style="margin:4px 0 8px">Blank, fillable D&amp;D sheets (the 2014 or 2024 official sheet, or your group's own). Note Tiger works out what
+        goes in each box once (a few minutes with the local AI); use <b>Test fill</b> to check, and <b>Fix boxes</b> if something lands in the wrong place.</div>
+      <div id="sheetList"><div class="empty">Loading…</div></div>
+      <div id="sheetMap"></div>
+      <datalist id="sheetKeys"></datalist>
+    </div>
     <div class="card">
       <div class="hint" style="margin-bottom:12px">Drag a system (or a single book) from your shelf into a game. Each game is one of your Discord servers, and <code>/game ask</code> there only searches its books. Drag from one game to another to put a copy there too; drop back on the shelf to take it out. A game with no books searches the whole shelf.</div>
       <div id="libServers"><div class="empty">Loading…</div></div></div>
@@ -637,8 +676,8 @@ function showTab(name) {
   document.querySelectorAll('main > section').forEach((s) => (s.hidden = s.id !== `tab-${name}`));
   if (name === 'sessions') loadSessions();
   if (name === 'settings') loadSettings();
-  if (name === 'library') loadLibrary();
-  if (name === 'campaign') loadCampaign();
+  if (name === 'library') { loadLibrary(); loadSheets(); }
+  if (name === 'campaign') { loadCampaign(); loadCharacters(); }
   location.hash = name;
 }
 
@@ -772,7 +811,7 @@ function fillGuildSelects() {
     if (sel.dataset.opts !== opts) {
       sel.innerHTML = opts || '<option value="">No servers</option>'; sel.dataset.opts = opts;
       if (id === '#sessGuild' && !$('#tab-sessions').hidden) loadSessions();
-      if (id === '#campGuild' && !$('#tab-campaign').hidden) loadCampaign();
+      if (id === '#campGuild' && !$('#tab-campaign').hidden) { loadCampaign(); loadCharacters(); }
     }
     if (prev && [...sel.options].some((o) => o.value === prev)) sel.value = prev;
   }
@@ -1672,6 +1711,156 @@ function councilBadge(c) {
   const text = [part(c.labels, 'labels'), part(c.recap, 'recap')].filter(Boolean).join(' · ');
   return ` <span class="tag" style="cursor:help" title="${esc(lines.join('\n'))}">🏛 Council: ${esc(text)}</span>`;
 }
+
+
+// ---------- characters (Campaign tab) ----------
+let chars = null;
+async function loadCharacters() {
+  const gid = $('#campGuild').value;
+  if (!gid) return;
+  try { chars = await api(`/api/characters/${gid}`); renderCharacters(); }
+  catch (e) { $('#charList').innerHTML = `<div class="empty">${esc(e.message)}</div>`; }
+}
+const sgn = (n) => (n == null ? '?' : n >= 0 ? `+${n}` : `${n}`);
+const amod = (v) => (v == null ? null : Math.floor((v - 10) / 2));
+function renderCharacters() {
+  const list = chars.characters;
+  $('#charCount').textContent = list.length ? `(${list.length})` : '';
+  if (!list.length) { $('#charList').innerHTML = '<div class="empty">No characters yet. Import a sheet here, or have players use <code>/sheet import</code> in Discord.</div>'; return; }
+  const sheetOpts = chars.sheets.map((n) => `<option>${esc(n)}</option>`).join('');
+  $('#charList').innerHTML = `<div class="chars">${list.map((c) => {
+    const cls = (c.classes || []).map((k) => `${k.name}${k.subclass ? ` (${k.subclass})` : ''} ${k.level}`).join(' / ');
+    return `<div class="char" data-id="${esc(c.id)}">
+      <h3>${esc(c.name)}</h3><div class="sub2">${esc([c.species, cls].filter(Boolean).join(' · ') || 'class not set')}${c.player ? ` · ${esc(c.player)}` : ''}</div>
+      <div class="stats"><span>🛡️ AC ${c.ac ?? '?'}</span><span>❤️ ${c.hp?.current ?? c.hp?.max ?? '?'}/${c.hp?.max ?? '?'}</span><span>💰 ${c.money?.gp || 0} gp</span></div>
+      <div class="abil">${['str', 'dex', 'con', 'int', 'wis', 'cha'].map((a) => `<div>${a.toUpperCase()}<b>${c.abilities?.[a] ?? '–'}</b>${sgn(amod(c.abilities?.[a]))}</div>`).join('')}</div>
+      <div class="acts">
+        ${chars.sheets.length ? `<select class="c-sheet">${sheetOpts}</select><button class="btn ghost c-pdf">📄 PDF</button>` : '<span class="hint">Add a blank sheet in Library to get PDFs</span>'}
+        <button class="btn ghost c-edit">Edit</button><button class="btn ghost c-del" title="Remove">🗑</button>
+      </div></div>`;
+  }).join('')}</div>`;
+  document.querySelectorAll('#charList .char').forEach((el) => {
+    const id = el.dataset.id;
+    el.querySelector('.c-pdf')?.addEventListener('click', () => {
+      window.location.href = `/api/characters/${$('#campGuild').value}/${encodeURIComponent(id)}/pdf?sheet=${encodeURIComponent(el.querySelector('.c-sheet').value)}`;
+    });
+    el.querySelector('.c-edit').onclick = () => editCharacter(list.find((c) => c.id === id));
+    el.querySelector('.c-del').onclick = async () => {
+      const c = list.find((x) => x.id === id);
+      if (!confirm(`Remove ${c.name}? (The player can import the sheet again.)`)) return;
+      await api(`/api/characters/${$('#campGuild').value}/${encodeURIComponent(id)}/delete`, { method: 'POST', body: {} }).catch((e) => toast(e.message));
+      loadCharacters();
+    };
+  });
+}
+function editCharacter(c) {
+  const box = $('#charEdit');
+  const cls = (c.classes || []).map((k) => `${k.name}${k.subclass ? ` (${k.subclass})` : ''} ${k.level}`).join(' / ');
+  const f = (id, label, val, type = 'text') => `<div><label>${label}</label><input type="${type}" id="ce_${id}" value="${esc(val ?? '')}"${id === 'classes' ? ' placeholder="Rogue (Thief) 3 / Fighter 1"' : ''}></div>`;
+  const { id: _i, updatedAt: _u, ...rest } = c;
+  box.innerHTML = `<div class="charedit"><h2 style="margin-top:0">Edit ${esc(c.name)}</h2>
+    <div class="g">${f('name', 'Name', c.name)}${f('player', 'Player', c.player)}${f('classes', 'Class & level', cls)}
+      ${f('species', 'Species', c.species)}${f('background', 'Background', c.background)}${f('ac', 'AC', c.ac, 'number')}
+      ${f('hpmax', 'HP max', c.hp?.max, 'number')}${f('hpcur', 'HP now', c.hp?.current, 'number')}${f('speed', 'Speed', c.speed)}
+      ${['str', 'dex', 'con', 'int', 'wis', 'cha'].map((a) => f(a, a.toUpperCase(), c.abilities?.[a], 'number')).join('')}
+      ${['pp', 'gp', 'sp', 'cp'].map((k) => f(k, k.toUpperCase(), c.money?.[k], 'number')).join('')}</div>
+    <details style="margin-top:10px"><summary style="cursor:pointer">Everything else (skills, spells, gear, features…) as JSON</summary>
+      <textarea id="ce_json">${esc(JSON.stringify(rest, null, 2))}</textarea></details>
+    <div class="row" style="margin-top:10px;gap:8px"><button class="btn" id="ce_save">Save</button><button class="btn ghost" id="ce_cancel">Cancel</button></div></div>`;
+  box.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  $('#ce_cancel').onclick = () => { box.innerHTML = ''; };
+  $('#ce_save').onclick = async () => {
+    let body;
+    try { body = JSON.parse($('#ce_json').value); } catch (e) { toast(`The JSON has a mistake: ${e.message}`); return; }
+    const v = (id) => $(`#ce_${id}`).value.trim();
+    const n = (id) => (v(id) === '' ? null : Number(v(id)));
+    body.id = c.id; body.name = v('name'); body.player = v('player'); body.species = v('species'); body.background = v('background');
+    body.classes = v('classes').split('/').map((p) => p.trim().match(/^(.+?)(?:\s*\(([^)]+)\))?\s*(\d{1,2})?$/)).filter(Boolean)
+      .map((m) => ({ name: m[1].trim(), subclass: (m[2] || '').trim(), level: Number(m[3]) || 1 }));
+    body.ac = n('ac'); body.speed = v('speed'); body.hp = { ...(body.hp || {}), max: n('hpmax'), current: n('hpcur') };
+    body.abilities = Object.fromEntries(['str', 'dex', 'con', 'int', 'wis', 'cha'].map((a) => [a, n(a)]));
+    body.money = { ...(body.money || {}), ...Object.fromEntries(['pp', 'gp', 'sp', 'cp'].map((k) => [k, n(k) || 0])) };
+    try { await api(`/api/characters/${$('#campGuild').value}`, { method: 'POST', body }); box.innerHTML = ''; toast('Saved'); loadCharacters(); }
+    catch (e) { toast(e.message); }
+  };
+}
+async function importCharacterFile(file) {
+  const gid = $('#campGuild').value; if (!gid || !file) return;
+  const btn = $('#charImportBtn'); btn.disabled = true; btn.textContent = 'Reading the sheet…';
+  try {
+    const res = await fetch(`/api/characters/${gid}/import`, { method: 'POST', headers: { 'Content-Type': 'application/pdf', 'X-Filename': encodeURIComponent(file.name) }, body: file });
+    const out = await res.json();
+    if (!res.ok) throw new Error(out.error || res.statusText);
+    toast(`${out.replaced ? 'Updated' : 'Imported'} ${out.character.name} (from ${out.how})`);
+    loadCharacters();
+  } catch (e) { toast(e.message); } finally { btn.disabled = false; btn.textContent = 'Import a sheet (PDF)'; }
+}
+$('#charImportBtn').onclick = () => $('#charFile').click();
+$('#charFile').onchange = (e) => { importCharacterFile(e.target.files[0]); e.target.value = ''; };
+$('#campGuild').addEventListener('change', loadCharacters);
+
+// ---------- blank character sheets (Library tab) ----------
+let sheetTimer = null;
+async function loadSheets() {
+  clearTimeout(sheetTimer);
+  let data;
+  try { data = await api('/api/sheets'); } catch (e) { $('#sheetList').innerHTML = `<div class="empty">${esc(e.message)}</div>`; return; }
+  $('#sheetKeys').innerHTML = data.keys.map((k) => `<option value="${k}">`).join('');
+  if (!data.sheets.length) { $('#sheetList').innerHTML = '<div class="empty">No blank sheets yet. Add a fillable PDF of the sheet your group uses.</div>'; return; }
+  $('#sheetList').innerHTML = data.sheets.map((t) => {
+    const m = t.matching;
+    const status = m?.running ? `⏳ Matching boxes… ${m.total ? `${m.done} of ${m.total}` : ''}`
+      : m?.error ? `⚠️ ${esc(m.error)}` : t.mapped ? `✓ ${t.matched} of ${t.boxes} boxes in use${t.mappedBy === 'edited' ? ' (fixed by hand)' : ''}` : 'Not matched yet';
+    return `<div class="sheetrow" data-name="${esc(t.name)}"><b>${esc(t.name)}</b><span class="hint">${status}</span><span style="flex:1"></span>
+      ${t.mapped ? `<button class="btn ghost s-test">Test fill</button><button class="btn ghost s-fix">Fix boxes</button>` : ''}
+      <button class="btn ghost s-match"${m?.running ? ' disabled' : ''}>${t.mapped ? 'Re-match' : 'Match boxes'}</button><button class="btn ghost s-del" title="Remove">🗑</button></div>`;
+  }).join('');
+  document.querySelectorAll('#sheetList .sheetrow').forEach((el) => {
+    const name = el.dataset.name;
+    el.querySelector('.s-match').onclick = async () => {
+      if (el.querySelector('.s-fix') && !confirm('Match all boxes again? Fixes you made by hand will be replaced.')) return;
+      await api(`/api/sheets/${encodeURIComponent(name)}/match`, { method: 'POST', body: {} }).catch((e) => toast(e.message)); loadSheets();
+    };
+    el.querySelector('.s-del').onclick = async () => {
+      if (!confirm(`Remove the "${name}" sheet?`)) return;
+      await api(`/api/sheets/${encodeURIComponent(name)}/remove`, { method: 'POST', body: {} }).catch((e) => toast(e.message)); $('#sheetMap').innerHTML = ''; loadSheets();
+    };
+    el.querySelector('.s-fix')?.addEventListener('click', () => showSheetMap(name));
+    el.querySelector('.s-test')?.addEventListener('click', () => window.open(`/api/sheets/${encodeURIComponent(name)}/sample`, '_blank'));
+  });
+  if (data.sheets.some((t) => t.matching?.running) && !$('#tab-library').hidden) sheetTimer = setTimeout(loadSheets, 3000);
+}
+async function showSheetMap(name) {
+  const map = await api(`/api/sheets/${encodeURIComponent(name)}/map`).catch((e) => { toast(e.message); return null; });
+  if (!map) return;
+  $('#sheetMap').innerHTML = `<h2 style="margin:16px 0 4px">Fix boxes: ${esc(name)}</h2>
+    <div class="hint">Each box of the sheet and what goes in it. Blank = left empty. Type to pick from the list (e.g. <code>skill_stealth</code>, <code>spell_1_3</code>).</div>
+    <div class="mapgrid"><table><tr><th>Page</th><th>Box</th><th>Printed nearby</th><th>Gets</th></tr>
+    ${map.boxes.map((b) => `<tr><td>${b.page}</td><td>${esc(b.name)}${b.type === 'checkbox' ? ' ☐' : ''}</td><td class="hint">${esc(b.label || '')}</td>
+      <td><input type="text" list="sheetKeys" data-box="${esc(b.name)}" value="${esc(b.key || '')}" style="width:190px"></td></tr>`).join('')}</table></div>
+    <div class="row" style="margin-top:10px;gap:8px"><button class="btn" id="smSave">Save</button><button class="btn ghost" id="smTest">Test fill</button><button class="btn ghost" id="smClose">Close</button></div>`;
+  $('#smClose').onclick = () => { $('#sheetMap').innerHTML = ''; };
+  $('#smTest').onclick = () => window.open(`/api/sheets/${encodeURIComponent(name)}/sample`, '_blank');
+  $('#smSave').onclick = async () => {
+    const keys = {};
+    document.querySelectorAll('#sheetMap input[data-box]').forEach((i) => { keys[i.dataset.box] = i.value.trim(); });
+    try { await api(`/api/sheets/${encodeURIComponent(name)}/map`, { method: 'POST', body: { keys } }); toast('Saved'); loadSheets(); }
+    catch (e) { toast(e.message); }
+  };
+}
+async function uploadSheets(files) {
+  for (const f of files) {
+    try {
+      const res = await fetch('/api/sheets/upload', { method: 'POST', headers: { 'Content-Type': 'application/pdf', 'X-Filename': encodeURIComponent(f.name) }, body: f });
+      const out = await res.json();
+      if (!res.ok) throw new Error(out.error || res.statusText);
+      toast(`Added ${out.name} (${out.boxes} boxes). Matching them now…`);
+    } catch (e) { toast(`${f.name}: ${e.message}`); }
+  }
+  loadSheets();
+}
+$('#sheetAddBtn').onclick = () => $('#sheetFile').click();
+$('#sheetFile').onchange = (e) => { uploadSheets([...e.target.files]); e.target.value = ''; };
 
 let loadedSettings = null;
 async function loadSettings() {
