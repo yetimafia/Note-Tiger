@@ -26,6 +26,10 @@ function setProgress(dir, from, to, frac, label) {
   const prev = progress.get(progKey(dir));
   progress.set(progKey(dir), { pct, label, startedAt: prev?.startedAt ?? Date.now() });
 }
+// While a game is being recorded, the local AI lets go of the graphics card 20 seconds after answering
+// (instead of Ollama's usual 5 minutes), so a quick /rules question doesn't hold the GPU your game is using.
+let gameLive = false;
+export function setGameLive(on) { gameLive = Boolean(on); }
 export function getProgress() { return Object.fromEntries(progress); }
 
 const anthropic = USE_CLAUDE ? new Anthropic({ apiKey: ANTHROPIC_API_KEY }) : null;
@@ -55,6 +59,7 @@ async function askOllama(system, user, maxTokens, json = false) {
       body: JSON.stringify({
         model: OLLAMA_MODEL,
         stream: false,
+        ...(gameLive ? { keep_alive: '20s' } : {}),
         messages: [{ role: 'system', content: system }, { role: 'user', content: user }],
         ...(json ? { format: 'json' } : {}),
         options: { num_ctx: OLLAMA_CONTEXT, num_predict: maxTokens, temperature: json ? 0 : 0.4 },

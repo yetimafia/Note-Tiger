@@ -12,6 +12,7 @@
 //   /ask question            ask anything about past sessions
 
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import {
   Client,
@@ -35,7 +36,7 @@ import {
   sessionLines, readTableTalk, readLabels, transcriptEntries, speakerColors, baseName, writeTranscriptFiles,
   sessionStats, statsText, sessionDir,
 } from './store.js';
-import { askAI, recapSession, buildArchive, ASK_SYSTEM, AI_LABEL, getProgress } from './ai.js';
+import { askAI, recapSession, buildArchive, ASK_SYSTEM, AI_LABEL, getProgress, setGameLive } from './ai.js';
 import { publishSite, siteConfigured, siteUrl } from './site.js';
 import { askBooks, booksFor, serverSetup, renderPage, pageInfo } from './library.js';
 import { buildCampaign, addEdit, campaignSummary, logRulesCall, npcKey, latestStory, allQuotes, gmPrep } from './campaign.js';
@@ -87,14 +88,18 @@ hfEnv.cacheDir = MODELS_DIR;
 
 // ---------- local speech-to-text (Whisper, runs on this computer) ----------
 // The model downloads once (a few hundred MB) on first start, then works offline.
+// Note Tiger shares the PC with your game and Discord: it runs at below-normal priority, and speech-to-text uses
+// only some of the processor's cores (Settings: SPEECH_THREADS), so the game always gets the CPU first.
+try { os.setPriority(0, os.constants.priority.PRIORITY_BELOW_NORMAL); } catch { /* not allowed: fine */ }
+const SPEECH_THREADS = Math.max(1, Number(process.env.SPEECH_THREADS) || Math.min(4, Math.max(2, Math.floor((os.availableParallelism?.() || os.cpus().length) / 4))));
 let whisperPromise = null;
 let whisperState = 'idle'; // idle | loading | ready | error
 let whisperError = null;
 function loadWhisper() {
   if (!whisperPromise) {
     whisperState = 'loading';
-    console.log(`Loading speech model ${WHISPER_MODEL} (first run downloads it, this can take a few minutes)…`);
-    whisperPromise = pipeline('automatic-speech-recognition', WHISPER_MODEL, { dtype: WHISPER_DTYPE })
+    console.log(`Loading speech model ${WHISPER_MODEL} on ${SPEECH_THREADS} CPU threads (first run downloads it, this can take a few minutes)…`);
+    whisperPromise = pipeline('automatic-speech-recognition', WHISPER_MODEL, { dtype: WHISPER_DTYPE, session_options: { intraOpNumThreads: SPEECH_THREADS, interOpNumThreads: 1 } })
       .then((p) => { whisperState = 'ready'; console.log('Speech model ready.'); return p; })
       .catch((err) => { whisperPromise = null; whisperState = 'error'; whisperError = err.message; throw err; });
   }
@@ -245,6 +250,7 @@ async function startSession(interaction) {
 
   await guild.members.fetch().catch(() => {});
   live.set(guild.id, { dir, meta, textChannel: interaction.channel, lines: [], pending: new Set(), active: new Set() });
+  setGameLive(true);
   connection.receiver.speaking.on('start', (userId) => listenTo(guild, connection, userId));
 
   // Auto-stop if the bot gets kicked or the connection dies.
@@ -275,6 +281,7 @@ async function stopSession(guild, channel, reason) {
   const rec = live.get(guild.id);
   if (!rec) return null;
   live.delete(guild.id);
+  setGameLive(live.size > 0);
   getVoiceConnection(guild.id)?.destroy();
 
   await channel.send(`⏹️ Recording stopped${reason ? ` (${reason})` : ''}. Finishing transcription and writing the recap…`);

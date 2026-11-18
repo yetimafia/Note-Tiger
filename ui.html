@@ -617,6 +617,13 @@
         <option value="onnx-community/whisper-medium.en">Medium (slower, more accurate)</option>
       </select>
       <div class="hint">Runs on this computer for free. A new model downloads on next start.</div>
+      <label for="SPEECH_THREADS">Processor cores for speech-to-text</label>
+      <select id="SPEECH_THREADS">
+        <option value="">Automatic (leaves most cores for your game)</option>
+        <option value="1">1 (lightest; may fall behind in busy sessions)</option>
+        <option value="2">2</option><option value="3">3</option><option value="4">4</option><option value="6">6</option><option value="8">8 (fastest; can make games lag)</option>
+      </select>
+      <div class="hint">If your game lags while recording, pick fewer cores, or switch to the Base model. Takes effect when the bot restarts.</div>
     </div>
 
     <div class="card">
@@ -2136,6 +2143,7 @@ async function loadSettings() {
   const w = $('#WHISPER_MODEL');
   if (s.WHISPER_MODEL && ![...w.options].some((o) => o.value === s.WHISPER_MODEL)) w.add(new Option(s.WHISPER_MODEL, s.WHISPER_MODEL));
   w.value = s.WHISPER_MODEL || 'onnx-community/whisper-small.en';
+  $('#SPEECH_THREADS').value = s.SPEECH_THREADS || '';
   document.querySelector(`input[name=ai][value=${s.ANTHROPIC_API_KEY.set ? 'claude' : 'local'}]`).checked = true;
   syncAiBoxes();
 }
@@ -2148,6 +2156,7 @@ $('#saveBtn').addEventListener('click', async () => {
     CLAUDE_MODEL: $('#CLAUDE_MODEL').value,
     OLLAMA_MODEL: $('#OLLAMA_MODEL').value,
     WHISPER_MODEL: $('#WHISPER_MODEL').value,
+    SPEECH_THREADS: $('#SPEECH_THREADS').value,
     SEPARATE_TABLE_TALK: $('#SEPARATE_TABLE_TALK').checked ? 'true' : 'false',
     SKIP_OPENING_RECAP: $('#SKIP_OPENING_RECAP').checked ? 'true' : 'false',
     SITE_ENABLED: $('#SITE_ENABLED').checked ? 'true' : 'false',

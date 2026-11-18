@@ -16,6 +16,7 @@ export const SETTINGS = [
   { key: 'CLAUDE_MODEL' },
   { key: 'OLLAMA_MODEL' },
   { key: 'WHISPER_MODEL' },
+  { key: 'SPEECH_THREADS' },
   { key: 'SEPARATE_TABLE_TALK' },
   { key: 'LOG_CHANNEL' },
   { key: 'RECAP_CHANNEL' },

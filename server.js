@@ -49,6 +49,9 @@ import { startWeb } from './web.js';
 import { publishSite, siteStatus, siteConfigured, publishLive } from './site.js';
 import { LIB_DIR, listBooks, syncLibrary, libraryProgress, addBook, removeBook, askBooks, renderPage, searchBooks, booksFor, serverSetups, setServerSetup, bookCover, librarySystems, setBookSystem, renameSystem, setSystemCover } from './library.js';
 
+// Recaps and the control panel run at below-normal priority so your game and Discord come first.
+try { const os = await import('node:os'); os.setPriority(0, os.constants.priority.PRIORITY_BELOW_NORMAL); } catch { /* fine */ }
+
 const RESTART_CODE = 75; // the launcher restarts the manager when it exits with this code
 
 // ---------- log buffer (manager + bot output, shown in the panel) ----------
@@ -166,6 +169,7 @@ function guildList() {
   return [...map.values()].map((g) => ({ ...g, sessions: listSessions(g.id).length }));
 }
 
+const recapsRunning = new Map(); // session folder → the recap being written
 startWeb({
   councilStatus() { return refreshCouncil(); },
   connectionInfo() {
@@ -294,10 +298,17 @@ startWeb({
   async regenerateRecap(gid, id, { reclassify = true } = {}) {
     const dir = sessionDir(gid, id);
     if (liveSessionId(gid) === id) throw new Error('That session is still recording.');
-    // A normal rewrite also re-checks which parts were table talk; after hand fixes it can skip that (much faster).
-    const recap = await recapSession(dir, { reclassify });
-    if (siteConfigured()) publishSite({ dirs: [dir] }).catch((e) => console.error('[website]', e.message));
-    return recap;
+    // One rewrite at a time per session: pressing the button again while it's working waits for the same one
+    // (two at once doubled the work on the graphics card).
+    if (recapsRunning.has(dir)) return recapsRunning.get(dir);
+    const job = (async () => {
+      // A normal rewrite also re-checks which parts were table talk; after hand fixes it can skip that (much faster).
+      const recap = await recapSession(dir, { reclassify });
+      if (siteConfigured()) publishSite({ dirs: [dir] }).catch((e) => console.error('[website]', e.message));
+      return recap;
+    })();
+    recapsRunning.set(dir, job);
+    try { return await job; } finally { recapsRunning.delete(dir); }
   },
   // Hand fixes from the transcript view: table talk / game, and who the GM was voicing.
   fixLines(gid, id, { keys, offTopic, voice }) {
