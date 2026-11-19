@@ -274,7 +274,8 @@ startWeb({
   progress() { return { ...(bot ? botStatus?.progress : null), ...getProgress() }; },
   async publishSite({ all = false, gid = null, id = null } = {}) {
     if (all) return publishSite({ all: true });
-    return publishSite({ dirs: [sessionDir(safeGid(gid), id)] });
+    if (liveSessionId(safeGid(gid)) === id) throw new Error('That session is still recording. Post it when the game is over.');
+    return publishSite({ dirs: [sessionDir(safeGid(gid), id)], explicit: true });
   },
   startBot,
   async stopBot() { await stopBot(); },

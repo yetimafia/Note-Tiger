@@ -1477,6 +1477,7 @@ async function openSession(id, view = 'recap') {
       <span style="flex:1"></span>
       <button class="btn ghost" id="dlBtn" title="Color-coded page that opens in any browser">Download transcript</button>
       <button class="btn ghost" id="repostBtn" title="Post this session's recap and transcript to Discord again (marked as updated)">Repost to Discord</button>
+      <button class="btn ghost" id="webBtn" title="Put this session's recap and transcript on the player website (encrypted with the group password)">🌐 Post to website</button>
       <button class="btn ghost" id="regenBtn" title="Re-checks table talk and writes the recap again">${s.recap ? 'Rewrite recap' : 'Write recap'}</button>
       <button class="btn danger" id="delBtn">Delete</button>
     </div>
@@ -1523,6 +1524,14 @@ async function openSession(id, view = 'recap') {
       toast(`Reposted${where ? `: ${where}` : ''}.${r.tips?.length ? ' ' + r.tips.join(' ') : ''}`);
     } catch (err) { toast(err.message); }
     e.target.disabled = false; e.target.textContent = 'Repost to Discord';
+  };
+  $('#webBtn').onclick = async (e) => {
+    e.target.disabled = true; e.target.textContent = 'Posting to the website…';
+    try {
+      const r = await api('/api/site/publish', { method: 'POST', body: { gid, id } });
+      toast(`On the player website: ${r.url} (GitHub takes a minute or two to update it).`);
+    } catch (err) { toast(err.message); }
+    e.target.disabled = false; e.target.textContent = '🌐 Post to website';
   };
   $('#delBtn').onclick = async () => {
     if (!confirm(`Delete "${s.title}" and its transcript for good?`)) return;

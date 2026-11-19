@@ -75,9 +75,16 @@ export function sessionPayload(dir) {
   };
 }
 
+// Finished sessions. A recording that never got a proper stop (the bot was closed or restarted mid-game) has no
+// end time; it still counts once its transcript hasn't changed for 20 minutes.
+function finished(d) {
+  const t = path.join(d, 'transcript.jsonl');
+  if (!fs.existsSync(t)) return false;
+  if (readJSON(path.join(d, 'meta.json'), {}).endedAt) return true;
+  return Date.now() - fs.statSync(t).mtimeMs > 20 * 60_000;
+}
 function allSessionDirs() {
-  return knownGuilds().flatMap((g) => listSessions(g.id).map((s) => s.dir))
-    .filter((d) => fs.existsSync(path.join(d, 'transcript.jsonl')) && readJSON(path.join(d, 'meta.json'), {}).endedAt);
+  return knownGuilds().flatMap((g) => listSessions(g.id).map((s) => s.dir)).filter(finished);
 }
 
 export function manifestFor(st, dirs) {
@@ -177,19 +184,20 @@ async function ensurePages() {
 // ---------- publish ----------
 let busy = Promise.resolve();
 // Publishes the given session folders (or every finished session) and refreshes the session list.
-export function publishSite({ dirs = null, all = false } = {}) {
-  const run = busy.then(() => doPublish({ dirs, all }));
+export function publishSite({ dirs = null, all = false, explicit = false } = {}) {
+  const run = busy.then(() => doPublish({ dirs, all, explicit }));
   busy = run.catch(() => {});
   return run;
 }
 
-async function doPublish({ dirs, all }) {
+async function doPublish({ dirs, all, explicit = false }) {
   if (!SITE_ENABLED) throw new Error('The player website is turned off in Settings.');
   if (!GITHUB_TOKEN || !SITE_REPO) throw new Error('Add your GitHub token and repository in Settings → Player website.');
   if (!SITE_PASSWORD || SITE_PASSWORD.length < 8) throw new Error('Set a group password (at least 8 characters) in Settings → Player website.');
   const st = siteState();
   const key = siteKey(st);
-  const every = allSessionDirs();
+  // A session posted by hand (its Post to website button) goes up even if it looks unfinished.
+  const every = [...new Set([...allSessionDirs(), ...(explicit ? (dirs ?? []).filter((d) => fs.existsSync(path.join(d, 'transcript.jsonl'))) : [])])];
   // After a password change everything must be re-encrypted.
   const target = all || st.passwordChanged ? every : (dirs ?? []).filter((d) => every.includes(d));
   for (const d of target) if (!st.files[d]) st.files[d] = crypto.randomBytes(12).toString('hex');
